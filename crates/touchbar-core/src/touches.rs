@@ -4,6 +4,10 @@ use crate::*;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Capture {
     pub target: HitTarget,
+    pub identity: CaptureId,
+    pub presentation: Option<PresentationId>,
+    surface: SurfaceId,
+    contact: ContactId,
     widget: WidgetSpec,
     by_column: bool,
     arena: GestureArena,
@@ -68,7 +72,7 @@ impl Core {
         if let Some(timer) = capture.hold_timer.take() {
             self.timers.cancel(timer);
         }
-        self.hold_gesture(&mut capture);
+        self.hold_gesture(&mut capture, output);
         let gestures = capture.arena.finish(point, self.now, &self.config);
         output.extend(self.keys.release_owner(KeyOwner::Contact {
             instance: capture.target.instance,
@@ -88,6 +92,7 @@ impl Core {
                         Origin::Physical,
                         None,
                     );
+                    self.widget_presentation(&capture, ActionKind::Activated, output);
                 }
                 self.capture_action(&capture, ActionKind::Released, None, Origin::Physical, None);
             }
@@ -100,17 +105,22 @@ impl Core {
                     Origin::Physical,
                     None,
                 );
+                self.widget_presentation(&capture, ActionKind::Activated, output);
+            }
+            WidgetKind::Key { .. } if capture.target.rect.contains(point) => {
+                self.widget_presentation(&capture, ActionKind::Activated, output);
             }
             WidgetKind::Scrubber
                 if gestures
                     .iter()
                     .any(|g| matches!(g, GestureEvent::Tap | GestureEvent::PanEnded)) =>
             {
-                self.scrubber_select(&capture, point);
+                self.scrubber_select(&capture, point, output);
             }
             _ => {}
         }
         self.set_pressed(&capture, false);
+        self.anchor_finished(surface, capture.identity, output);
     }
     fn touch_down(
         &mut self,
@@ -119,6 +129,14 @@ impl Core {
         point: Point,
         output: &mut Vec<Output>,
     ) {
+        if self
+            .surfaces
+            .get(&surface)
+            .is_none_or(|s| s.mode != Mode::Display || s.captures.contains_key(&contact))
+            || !self.panel_down(surface, point, output)
+        {
+            return;
+        }
         let Some(s) = self
             .surfaces
             .get(&surface)
@@ -134,12 +152,26 @@ impl Core {
             .hit_map
             .iter()
             .enumerate()
+            .filter(|(_, h)| {
+                if s.presentation.is_some() {
+                    h.plane == ScenePlane::Presentation
+                } else {
+                    h.plane != ScenePlane::Presentation
+                }
+            })
             .filter(|(_, h)| h.rect.contains(point))
             .max_by_key(|(order, h)| (h.plane, *order));
         let fallback = || {
             s.hit_map
                 .iter()
                 .enumerate()
+                .filter(|(_, h)| {
+                    if s.presentation.is_some() {
+                        h.plane == ScenePlane::Presentation
+                    } else {
+                        h.plane != ScenePlane::Presentation
+                    }
+                })
                 .filter_map(|(order, h)| {
                     h.rect
                         .vertical_distance(point)
@@ -162,21 +194,34 @@ impl Core {
         }) else {
             return;
         };
-        let Some(item) = s
-            .scene
-            .items
-            .iter()
-            .find(|i| i.instance == target.instance && i.plane == target.plane)
-        else {
+        let Some(item) = s.scene.items.iter().find(|i| {
+            i.instance == target.instance
+                && (i.plane == target.plane
+                    || target.plane == ScenePlane::Presentation
+                        && s.presentation
+                            .as_ref()
+                            .is_some_and(|p| p.scene.owner == i.instance))
+        }) else {
             return;
         };
-        let Some(widget) = item
-            .set
-            .all_widgets()
-            .into_iter()
-            .find(|w| w.id == target.widget)
-            .cloned()
-        else {
+        let mut widgets = vec![];
+        if target.plane == ScenePlane::Presentation {
+            let Some(panel) = s
+                .presentation
+                .as_ref()
+                .filter(|p| p.scene.owner == target.instance)
+            else {
+                return;
+            };
+            for widget in &panel.scene.panel.widgets {
+                widget.visit(&mut widgets);
+            }
+        } else {
+            for widget in &item.set.widgets {
+                widget.visit(&mut widgets);
+            }
+        }
+        let Some(widget) = widgets.into_iter().find(|w| w.id == target.widget).cloned() else {
             return;
         };
         if !matches!(
@@ -239,7 +284,16 @@ impl Core {
                 },
             )
         });
+        let identity = CaptureId(self.next_capture);
+        self.next_capture = self
+            .next_capture
+            .checked_add(1)
+            .expect("capture id exhausted");
         let mut capture = Capture {
+            identity,
+            surface,
+            contact,
+            presentation: s.presentation.as_ref().map(|p| p.scene.id),
             target: target.clone(),
             widget,
             by_column: direct.is_none(),
@@ -408,7 +462,7 @@ impl Core {
             );
         }
     }
-    fn scrubber_select(&mut self, capture: &Capture, point: Point) {
+    fn scrubber_select(&mut self, capture: &Capture, point: Point, output: &mut Vec<Output>) {
         let Some(layout) = &capture.scrubber_layout else {
             return;
         };
@@ -428,9 +482,10 @@ impl Core {
                 Origin::Physical,
                 None,
             );
+            self.widget_presentation(&selected_capture, ActionKind::Selected, output);
         }
     }
-    fn hold_gesture(&mut self, capture: &mut Capture) {
+    fn hold_gesture(&mut self, capture: &mut Capture, output: &mut Vec<Output>) {
         if capture
             .arena
             .advance(self.now, &self.config)
@@ -443,6 +498,7 @@ impl Core {
                 Origin::Physical,
                 None,
             );
+            self.widget_presentation(capture, ActionKind::LongPressed, output);
         }
     }
     pub(crate) fn hold_contact(
@@ -451,6 +507,7 @@ impl Core {
         contact: ContactId,
         instance: InstanceId,
         timer: TimerId,
+        output: &mut Vec<Output>,
     ) {
         let Some(mut capture) = self
             .surfaces
@@ -461,7 +518,18 @@ impl Core {
         };
         if capture.target.instance == instance && capture.hold_timer == Some(timer) {
             capture.hold_timer = None;
-            self.hold_gesture(&mut capture);
+            // The live anchor must be present while accepting a transient open.
+            self.surfaces
+                .get_mut(&surface)
+                .unwrap()
+                .captures
+                .insert(contact, capture.clone());
+            self.hold_gesture(&mut capture, output);
+            self.surfaces
+                .get_mut(&surface)
+                .unwrap()
+                .captures
+                .remove(&contact);
         }
         self.surfaces
             .get_mut(&surface)
@@ -483,14 +551,66 @@ impl Core {
                 .get_mut(&capture.target.instance.number)
                 .filter(|i| i.id == capture.target.instance)
         {
-            instance.enqueue(LogicEvent::Action(ActionEvent {
-                action: action.clone(),
-                kind,
-                value,
-                record_key: capture.target.record_key.clone(),
-                origin,
-                cancel_reason,
-            }));
+            instance.enqueue_physical(
+                LogicEvent::Action(ActionEvent {
+                    action: action.clone(),
+                    kind,
+                    value,
+                    record_key: capture.target.record_key.clone(),
+                    origin,
+                    cancel_reason,
+                }),
+                Some(crate::presentations::PhysicalContext {
+                    surface: capture.surface,
+                    contact: capture.contact,
+                    capture: capture.identity,
+                    target: capture.target.clone(),
+                    presentation: capture.presentation,
+                }),
+            );
+        }
+    }
+    fn widget_presentation(
+        &mut self,
+        capture: &Capture,
+        kind: ActionKind,
+        output: &mut Vec<Output>,
+    ) {
+        let has_callback = !matches!(capture.widget.kind, WidgetKind::Key { .. })
+            && capture.widget.handlers.contains_key(&kind)
+            && self
+                .instances
+                .get(&capture.target.instance.number)
+                .is_some_and(|i| i.set.logic.is_some());
+        let (panel, lifecycle) = match kind {
+            ActionKind::Activated => (
+                capture.widget.expanded_panel.clone(),
+                PresentationLifecycle::Persistent,
+            ),
+            ActionKind::LongPressed => (
+                capture.widget.press_and_hold_panel.clone(),
+                PresentationLifecycle::Transient,
+            ),
+            _ => (None, PresentationLifecycle::Persistent),
+        };
+        if let Some(panel) = panel {
+            self.open_presentation(
+                capture.target.instance,
+                crate::presentations::PhysicalContext {
+                    surface: capture.surface,
+                    contact: capture.contact,
+                    capture: capture.identity,
+                    target: capture.target.clone(),
+                    presentation: capture.presentation,
+                },
+                panel,
+                touchbar_model::Placement::Anchored,
+                lifecycle,
+                output,
+            );
+        }
+        if !has_callback {
+            self.dismiss_selection(capture.surface, capture.presentation, kind, output);
         }
     }
     pub(crate) fn cancel_contact(
@@ -530,6 +650,7 @@ impl Core {
         {
             output.extend(instance.dispatch(&mut self.next_call));
         }
+        self.anchor_finished(surface, capture.identity, output);
     }
     pub(crate) fn cancel_surface(
         &mut self,
@@ -619,19 +740,23 @@ impl Core {
                             Some(CancelReason::Hidden)
                         }
                         Some(_)
-                            if !s.hit_map.iter().any(|h| {
-                                h.instance == c.target.instance
-                                    && h.widget == c.target.widget
-                                    && h.record_key == c.target.record_key
-                                    && h.plane == c.target.plane
-                            }) =>
+                            if !((s.presentation.is_some() || s.layout_presentation.is_some())
+                                && c.presentation.is_none())
+                                && !s.hit_map.iter().any(|h| {
+                                    h.instance == c.target.instance
+                                        && h.widget == c.target.widget
+                                        && h.record_key == c.target.record_key
+                                        && h.plane == c.target.plane
+                                }) =>
                         {
                             Some(CancelReason::Layout)
                         }
                         Some(_)
-                            if c.scrubber_layout
-                                .as_ref()
-                                .is_some_and(|layout| !s.scrubbers.contains(layout)) =>
+                            if !((s.presentation.is_some() || s.layout_presentation.is_some())
+                                && c.presentation.is_none())
+                                && c.scrubber_layout
+                                    .as_ref()
+                                    .is_some_and(|layout| !s.scrubbers.contains(layout)) =>
                         {
                             Some(CancelReason::Layout)
                         }
@@ -697,7 +822,7 @@ pub(crate) fn valid_scrubbers(layouts: &[ScrubberLayout], max_records: usize) ->
             })
     })
 }
-fn widget_available(set: &SetSpec, state: &StatePatch, id: &WidgetId) -> bool {
+pub(crate) fn widget_available(set: &SetSpec, state: &StatePatch, id: &WidgetId) -> bool {
     fn in_widgets(
         widgets: &[WidgetSpec],
         state: &StatePatch,

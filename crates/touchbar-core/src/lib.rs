@@ -5,7 +5,9 @@ mod config;
 mod gestures;
 mod instances;
 mod keys;
+mod presentations;
 mod profiles;
+use presentations::Presentation;
 mod scenes;
 mod timers;
 mod touches;
@@ -39,12 +41,20 @@ struct SurfaceState {
     placements: Vec<Placement>,
     captures: BTreeMap<ContactId, Capture>,
     scrubbers: Vec<ScrubberLayout>,
+    slots: Vec<SlotBounds>,
+    presentation: Option<Presentation>,
+    render_presentation: Option<PresentationId>,
+    layout_presentation: Option<PresentationId>,
 }
 // Timer purposes are added by the dependent state machines starting in T5.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum CoreTimer {
     Profile {
         surface: SurfaceId,
+    },
+    Presentation {
+        surface: SurfaceId,
+        id: PresentationId,
     },
     Hold {
         surface: SurfaceId,
@@ -65,6 +75,8 @@ pub struct Core {
     next_generation: u64,
     next_instance: u64,
     next_call: u64,
+    next_capture: u64,
+    next_presentation: u64,
     instances: BTreeMap<u64, Instance>,
     instance_timers: BTreeMap<u64, (InstanceId, TimerId, Timestamp)>,
     timers: TimerRegistry<CoreTimer>,
@@ -84,6 +96,8 @@ impl Core {
             next_generation: 1,
             next_instance: 1,
             next_call: 1,
+            next_capture: 1,
+            next_presentation: 1,
             instances: BTreeMap::new(),
             instance_timers: BTreeMap::new(),
             timers: TimerRegistry::default(),
@@ -167,6 +181,10 @@ impl Core {
                         placements: vec![],
                         captures: BTreeMap::new(),
                         scrubbers: vec![],
+                        slots: vec![],
+                        presentation: None,
+                        render_presentation: None,
+                        layout_presentation: None,
                     },
                 );
                 self.resolve_surface(id, &mut output);
@@ -185,9 +203,11 @@ impl Core {
                 }
                 if self.surfaces.get(&info.id).is_some_and(|s| s.info != info) {
                     self.cancel_surface(info.id, CancelReason::Layout, &mut output);
+                    self.close_presentation(info.id, &mut output);
                     if let Some(s) = self.surfaces.get_mut(&info.id) {
                         s.hit_map.clear();
                         s.scrubbers.clear();
+                        s.slots.clear();
                         s.layout_generation = None;
                     }
                 }
@@ -252,17 +272,32 @@ impl Core {
                 hit_map,
                 representations,
                 scrubbers,
+                slots,
+                presentation,
             } => {
                 if let Some(state) = self.surfaces.get_mut(&surface)
                     && state.mode == Mode::Display
                     && state.generation == generation
                     && state.render_info.as_ref() == Some(&state.info)
+                    && state.render_presentation == state.presentation.as_ref().map(|p| p.scene.id)
                 {
+                    if presentation.map(|p| p.id) != state.render_presentation {
+                        warn(&mut output, "layout has mismatched panel identity");
+                        return output;
+                    }
                     if hit_map.iter().any(|hit| !touches::valid_rect(hit.rect))
                         || !touches::valid_scrubbers(&scrubbers, self.config.max_records)
+                        || !presentations::valid_bounds(&slots, presentation, &state.info)
                     {
                         warn(&mut output, "invalid layout geometry");
                         return output;
+                    }
+                    state.layout_presentation = state.render_presentation;
+                    state.slots = slots;
+                    if let Some(panel) = &mut state.presentation {
+                        panel.bounds = presentation
+                            .filter(|b| b.id == panel.scene.id)
+                            .map(|b| b.bounds);
                     }
                     state.scrubbers = scrubbers;
                     state.hit_map = hit_map;
@@ -334,11 +369,18 @@ impl Core {
             Input::Timer { id } => {
                 for (timer, task) in self.timers.take_due(now, id) {
                     match task {
+                        CoreTimer::Presentation { surface, id } => {
+                            if self.surfaces.get(&surface).is_some_and(|s| {
+                                s.presentation.as_ref().is_some_and(|p| p.scene.id == id)
+                            }) {
+                                self.close_presentation(surface, &mut output);
+                            }
+                        }
                         CoreTimer::Hold {
                             surface,
                             contact,
                             instance,
-                        } => self.hold_contact(surface, contact, instance, timer),
+                        } => self.hold_contact(surface, contact, instance, timer, &mut output),
                         CoreTimer::Profile { surface } => {
                             for instance in
                                 self.instances.values_mut().filter(|i| i.surface == surface)
@@ -380,13 +422,14 @@ impl Core {
                 call,
                 update,
             } => {
-                if let Some(current) = self
+                let accepted = self
                     .instances
                     .get_mut(&instance.number)
                     .filter(|i| i.id == instance)
-                {
-                    // Accepted non-state parts are connected to presentations/effects in T8/T10.
-                    let _ = current.update(call, update, &self.config, &mut output);
+                    .and_then(|current| current.update(call, update, &self.config, &mut output));
+                if let Some((completed, update)) = accepted {
+                    self.presentation_reply(instance, &completed, update.presentation, &mut output);
+                    // Requests/subscriptions connect in T10, before pending-profile completion.
                 }
             }
             Input::LogicError {
@@ -399,7 +442,11 @@ impl Core {
                     .get_mut(&instance.number)
                     .filter(|i| i.id == instance)
                 {
-                    output.extend(current.error(call, message, now, &self.config));
+                    let (errors, completed) = current.error(call, message, now, &self.config);
+                    output.extend(errors);
+                    if let Some(completed) = completed {
+                        self.presentation_reply(instance, &completed, None, &mut output);
+                    }
                 }
             }
             Input::LogicFault {
@@ -430,6 +477,7 @@ impl Core {
             | Input::SubscriptionData { .. }
             | Input::SubscriptionLost { .. } => {}
         }
+        self.synchronize_presentations(&mut output);
         self.synchronize_captures(&mut output);
         self.finish_pending_profiles(&mut output);
         self.synchronize_instances(&mut output);
@@ -492,6 +540,13 @@ impl Core {
         }
     }
     fn reconcile_scene(&mut self, id: SurfaceId, output: &mut Vec<Output>) {
+        if self
+            .surfaces
+            .get(&id)
+            .is_some_and(|s| s.scene.profile != s.profile.active)
+        {
+            self.close_presentation(id, output);
+        }
         let Some(surface) = self.surfaces.get_mut(&id) else {
             return;
         };
@@ -535,6 +590,13 @@ impl Core {
                 self.instances.insert(instance.number, logic);
             }
             PlacementChange::Remove { instance } => {
+                if self.surfaces.get(&surface).is_some_and(|s| {
+                    s.presentation
+                        .as_ref()
+                        .is_some_and(|p| p.scene.owner == instance)
+                }) {
+                    self.close_presentation(surface, output);
+                }
                 self.cancel_instance(instance, CancelReason::Profile, output);
                 output.extend(self.keys.release_owner(KeyOwner::Logic(instance)));
                 if let Some(mut logic) = self.instances.remove(&instance.number) {
@@ -545,6 +607,7 @@ impl Core {
     }
     fn remove_surface(&mut self, id: SurfaceId, reason: CancelReason, output: &mut Vec<Output>) {
         self.cancel_surface(id, reason, output);
+        self.close_presentation(id, output);
         output.extend(self.keys.release_surface(id));
         if let Some(surface) = self.surfaces.remove(&id) {
             if let Some((timer, _)) = surface.profile_timer {
@@ -667,6 +730,7 @@ impl Core {
             .next_generation
             .checked_add(1)
             .expect("render generation exhausted");
+        surface.render_presentation = surface.presentation.as_ref().map(|p| p.scene.id);
         surface.render_info = Some(surface.info.clone());
         surface.dirty = false;
         surface.frame_pending = true;

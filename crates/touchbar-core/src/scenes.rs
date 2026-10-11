@@ -127,6 +127,7 @@ pub(crate) fn compose(
             instance: i.instance,
         })
         .collect();
+    scene.presentation = previous.presentation.clone();
     changes.extend(creates);
     Composition {
         scene,

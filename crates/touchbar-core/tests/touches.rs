@@ -145,6 +145,8 @@ fn layout(c: &mut Core, at: u64, _id: InstanceId, hit_map: HitMap) {
     c.handle(
         Timestamp(at),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(1),
             generation,
             hit_map,
@@ -222,6 +224,8 @@ fn removing_widget_from_layout_cancels_capture_and_releases_key() {
     let out = c.handle(
         Timestamp(2),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(1),
             generation,
             hit_map: vec![],
@@ -248,6 +252,8 @@ fn layout_cancel_is_synthetic_and_reports_reason() {
     let out = c.handle(
         Timestamp(3),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(1),
             generation,
             hit_map: vec![],
@@ -273,6 +279,8 @@ fn invalid_scrubber_geometry_is_rejected_without_poisoning_existing_layout() {
     let out = c.handle(
         Timestamp(1),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(1),
             generation,
             hit_map: vec![hit(id, "control", 10.0)],
@@ -329,6 +337,8 @@ fn late_layout_for_pre_resize_render_cannot_restore_obsolete_hit_map() {
     c.handle(
         Timestamp(2),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(1),
             generation,
             hit_map: vec![hit(id, "control", 10.0)],
@@ -451,6 +461,8 @@ fn scrubber_layout(c: &mut Core, id: InstanceId) {
     c.handle(
         Timestamp(0),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(1),
             generation,
             hit_map: vec![hit(id, "control", 10.0)],
@@ -522,6 +534,8 @@ fn same_contact_id_on_two_surfaces_keeps_separate_owners() {
     c.handle(
         Timestamp(0),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(2),
             generation: second.generation,
             hit_map: vec![hit(id, "control", 10.0)],

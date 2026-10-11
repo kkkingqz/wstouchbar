@@ -115,7 +115,15 @@ macro_rules! counter_id {
         pub struct $name(pub u64);
     )+ };
 }
-counter_id!(SurfaceId, Generation, CallId, TimerId, Timestamp);
+counter_id!(
+    SurfaceId,
+    Generation,
+    CallId,
+    TimerId,
+    Timestamp,
+    CaptureId,
+    PresentationId
+);
 impl Timestamp {
     pub fn after(self, milliseconds: u64) -> Self {
         Self(self.0.saturating_add(milliseconds))

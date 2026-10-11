@@ -115,6 +115,8 @@ fn native_ignores_late_layout_and_frame_done() {
         },
     );
     let layout = Input::Layout {
+        slots: vec![],
+        presentation: None,
         surface: SurfaceId(1),
         generation,
         hit_map: vec![],
@@ -144,6 +146,8 @@ fn reconnect_reuses_id_but_not_render_generation() {
     c.handle(
         Timestamp(3),
         Input::Layout {
+            slots: vec![],
+            presentation: None,
             surface: SurfaceId(2),
             generation: first,
             hit_map: vec![],

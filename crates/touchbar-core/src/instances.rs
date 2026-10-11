@@ -1,3 +1,4 @@
+use crate::presentations::PhysicalContext;
 use crate::{CoreConfig, InstanceSnapshot, InstanceStatus, LogLevel, Output};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, VecDeque};
@@ -8,6 +9,17 @@ struct InFlight {
     call: CallId,
     invocation: LogicCall,
     discard_update: bool,
+    physical: Option<PhysicalContext>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct QueuedCall {
+    invocation: LogicCall,
+    physical: Option<PhysicalContext>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct CompletedCall {
+    pub invocation: LogicCall,
+    pub physical: Option<PhysicalContext>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Instance {
@@ -25,7 +37,7 @@ pub(crate) struct Instance {
     failures: u32,
     fault: Option<String>,
     description: Option<LogicDescription>,
-    queue: VecDeque<LogicCall>,
+    queue: VecDeque<QueuedCall>,
     in_flight: Option<InFlight>,
 }
 impl Instance {
@@ -111,13 +123,19 @@ impl Instance {
             })
             .collect();
         self.description = Some(description);
-        self.queue.push_back(LogicCall::Init {
-            config: self.set.logic_config.clone(),
-            persisted,
+        self.queue.push_back(QueuedCall {
+            invocation: LogicCall::Init {
+                config: self.set.logic_config.clone(),
+                persisted,
+            },
+            physical: None,
         });
         vec![]
     }
     pub fn enqueue(&mut self, event: LogicEvent) {
+        self.enqueue_physical(event, None);
+    }
+    pub fn enqueue_physical(&mut self, event: LogicEvent, physical: Option<PhysicalContext>) {
         if self.set.logic.is_none()
             || !matches!(
                 self.status,
@@ -131,15 +149,22 @@ impl Instance {
         }
         if let LogicEvent::Action(action) = &event
             && action.kind == ActionKind::ValueChanged
-            && let Some(LogicCall::Handle(LogicEvent::Action(last))) = self.queue.back_mut()
+            && let Some(QueuedCall {
+                invocation: LogicCall::Handle(LogicEvent::Action(last)),
+                physical: previous,
+            }) = self.queue.back_mut()
             && last.kind == ActionKind::ValueChanged
             && last.action == action.action
             && last.record_key == action.record_key
         {
             *last = action.clone();
+            *previous = physical;
             return;
         }
-        self.queue.push_back(LogicCall::Handle(event));
+        self.queue.push_back(QueuedCall {
+            invocation: LogicCall::Handle(event),
+            physical,
+        });
     }
     pub fn has_physical_work(&self) -> bool {
         let physical = |call: &LogicCall| {
@@ -154,7 +179,7 @@ impl Instance {
         self.in_flight
             .as_ref()
             .is_some_and(|c| !c.discard_update && physical(&c.invocation))
-            || self.queue.iter().any(physical)
+            || self.queue.iter().any(|c| physical(&c.invocation))
     }
     pub fn discard_physical_work(&mut self) {
         let physical = |call: &LogicCall| {
@@ -166,7 +191,7 @@ impl Instance {
                 }))
             )
         };
-        self.queue.retain(|call| !physical(call));
+        self.queue.retain(|call| !physical(&call.invocation));
         if let Some(flight) = &mut self.in_flight
             && physical(&flight.invocation)
         {
@@ -179,7 +204,8 @@ impl Instance {
         if self.in_flight.is_some() || !self.runtime_alive {
             return None;
         }
-        let invocation = self.queue.pop_front()?;
+        let queued = self.queue.pop_front()?;
+        let invocation = queued.invocation;
         if self.status == InstanceStatus::Loading && !matches!(invocation, LogicCall::Init { .. }) {
             return None;
         }
@@ -195,6 +221,7 @@ impl Instance {
             call,
             invocation: invocation.clone(),
             discard_update: false,
+            physical: queued.physical,
         });
         Some(Output::CallLogic {
             instance: self.id,
@@ -208,7 +235,7 @@ impl Instance {
         mut update: LogicUpdate,
         config: &CoreConfig,
         output: &mut Vec<Output>,
-    ) -> Option<(LogicCall, LogicUpdate)> {
+    ) -> Option<(CompletedCall, LogicUpdate)> {
         if !self.matches_call(call) {
             return None;
         }
@@ -242,7 +269,13 @@ impl Instance {
         } else {
             self.failures = 0;
         }
-        Some((invocation, update))
+        Some((
+            CompletedCall {
+                invocation,
+                physical: flight.physical,
+            },
+            update,
+        ))
     }
     pub fn error(
         &mut self,
@@ -250,18 +283,22 @@ impl Instance {
         message: String,
         now: Timestamp,
         config: &CoreConfig,
-    ) -> Vec<Output> {
+    ) -> (Vec<Output>, Option<CompletedCall>) {
         if !self.matches_call(call) {
-            return vec![];
+            return (vec![], None);
         }
         if matches!(
             self.in_flight.as_ref().expect("matched call").invocation,
             LogicCall::Init { .. }
         ) {
-            return self.fail(now, message, true, config);
+            return (self.fail(now, message, true, config), None);
         }
-        self.in_flight = None;
-        vec![self.warning(&message)]
+        let flight = self.in_flight.take().expect("matched call");
+        let completed = (!flight.discard_update).then_some(CompletedCall {
+            invocation: flight.invocation,
+            physical: flight.physical,
+        });
+        (vec![self.warning(&message)], completed)
     }
     pub fn call_fault(
         &mut self,
@@ -299,7 +336,7 @@ impl Instance {
             (InstanceStatus::Visible, false) => {
                 self.status = InstanceStatus::Hidden;
                 self.queue
-                    .retain(|c| !matches!(c, LogicCall::Handle(LogicEvent::Action(_))));
+                    .retain(|c| !matches!(c.invocation, LogicCall::Handle(LogicEvent::Action(_))));
                 self.enqueue(LogicEvent::Hidden);
             }
             _ => {}

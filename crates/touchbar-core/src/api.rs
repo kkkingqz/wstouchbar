@@ -87,6 +87,27 @@ pub struct ScrubberLayout {
 pub struct Scene {
     pub profile: Option<ProfileRef>,
     pub items: Vec<SceneItem>,
+    pub presentation: Option<PresentationScene>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PresentationScene {
+    pub id: PresentationId,
+    pub owner: InstanceId,
+    pub panel: PanelSpec,
+    pub placement: Placement,
+    pub lifecycle: PresentationLifecycle,
+    pub anchor: Rect,
+    pub region: Rect,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlotBounds {
+    pub instance: InstanceId,
+    pub rect: Rect,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PresentationLayout {
+    pub id: PresentationId,
+    pub bounds: Rect,
 }
 pub type Representations = Vec<(InstanceId, String)>;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -119,6 +140,8 @@ pub enum Input {
         hit_map: HitMap,
         representations: Representations,
         scrubbers: Vec<ScrubberLayout>,
+        slots: Vec<SlotBounds>,
+        presentation: Option<PresentationLayout>,
     },
     Fact {
         name: FactName,
