@@ -77,3 +77,12 @@ Shrinking удаляет операции целиком и уменьшает �
 coalesce ползунка с backend 1000 и 100 мс, Fn, Pending, resume, плотность,
 независимость поверхностей и desktop-маршрут клавиш. Каждый сценарий с Harness
 проверяет инварианты на каждом входе и JSON replay итоговой трассы.
+
+Длинный прогон выполняется с оптимизацией, чтобы 100000 последовательностей
+укладывались в обычное время CI:
+
+```sh
+PROPTEST_CASES=100000 cargo test -p touchbar-testkit --test properties --release --locked -- --nocapture
+```
+
+Критерии и результаты этапа 1 — [приёмка](validation/stage-1.md).

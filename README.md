@@ -9,10 +9,16 @@ A rewrite of [kkkingqz/touchbar](https://github.com/kkkingqz/touchbar)
 [cameroncooper/touchbar](https://github.com/cameroncooper/touchbar)).
 The rewrite follows [docs/architecture](docs/architecture/README.md) (in Russian).
 Stage 1 builds the pure engine; the daemon, renderer and WebAssembly runtime
-are planned for later stages. The core currently implements profiles, instance
-lifecycles, touch gestures, panels and key bindings with per-surface layer stacks. It schedules effect requests and
-subscriptions with cancellation, coalescing, quotas and deterministic timers. Panel widgets share their owner's logic
-and state; the renderer supplies explicit slot and panel bounds.
+are planned for later stages. The core implements profiles, instance lifecycles,
+touch gestures, panels and
+key bindings with per-surface layer stacks. It schedules effect requests and
+subscriptions with cancellation, coalescing, quotas and deterministic timers.
+Panel widgets share their owner's logic and state. Scoped persistence and full
+checkpoints preserve state across recreation and replay.
+
+The virtual-time testkit provides fake logic, effects and layout, checks all
+twelve engine invariants after each input, and reproduces JSON regression
+scenarios. See [testing](docs/testing.md) and [stage 1 acceptance](docs/validation/stage-1.md).
 
 ## Development
 
@@ -26,7 +32,14 @@ cargo test --workspace --locked
 ```
 
 CI also runs a scheduled and manually triggered test job with
-`PROPTEST_CASES=100000`. The property tests are added during stage 1.
+`PROPTEST_CASES=100000` in release mode. To run the invariant property locally:
+
+```sh
+PROPTEST_CASES=100000 cargo test -p touchbar-testkit --test properties --release --locked -- --nocapture
+```
+
+The project has no runnable daemon or user service yet; current tests use only
+the pure engine and fake executors.
 
 ## License
 
