@@ -74,7 +74,7 @@ Connecting ──Ready──▶ Ready ──Lost──▶ Connecting (backoff 1,
 | `Version`, `Capabilities` | свойства | версия интерфейса, список поддерживаемого |
 | `GetState() → a{sv}` | метод | все факты разом (при подключении) |
 | `StateChanged(a{sv})` | сигнал | изменившиеся факты |
-| `Shortcut(as keys, s app) → ()` | метод | нажать сочетание, если `app` пустой или совпадает с приложением в фокусе |
+| `Shortcut(as keys, s app) → ()` | метод | нажать сочетание, если `app` пустой или совпадает с приложением в фокусе. Пока экран заблокирован, отвергается (как и `LaunchApp`) |
 | `ActivateWorkspace(s id)` | метод | |
 | `LaunchApp(s id)` | метод | |
 

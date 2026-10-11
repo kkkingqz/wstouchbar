@@ -19,7 +19,7 @@
 
 ```
 сессия                               touchbard
-  Hello{version=2} ───────────────────▶ проверка peer: активная сессия seat0
+  Hello{version=2} ───────────────────▶ проверка: UID клиента = UID активной сессии seat0
                    ◀─────────────────── Welcome{caps, width, height, mm}   или Revoked{reason}
                    ◀─────────────────── ModeChanged{display|native}
  (в display)       ◀─────────────────── Swapchain (заголовок + fd)
@@ -32,7 +32,7 @@
 
 | kind | Поля | Смысл |
 |---|---|---|
-| `Hello` | `value` = версия, `payload` = заявленный id графической сессии (ASCII, до 8 байт) | Первое сообщение. Проверка владельца — в [01-processes.md](01-processes.md) |
+| `Hello` | `value` = версия | Первое сообщение. Проверка владельца по UID и активной сессии seat0 — в [01-processes.md](01-processes.md) |
 | `FrameDamage` | `payload` = x\|y<<16\|w<<32\|h<<48, физические пиксели | До 8 штук перед `FrameReady`. Если их не было, обновлён весь кадр |
 | `FrameReady` | `value` = индекс буфера, `payload` = номер кадра | Буфер готов к выводу |
 | `Key` | `value` = `SystemKey`, `x` = фаза (pressed/released) | Ввести клавишу через uinput. Автоповтор делает ядро (`EV_REP` у uinput-устройства) |
@@ -49,7 +49,7 @@
 |---|---|---|
 | `Welcome` | `value` = caps, `x`,`y` = ширина и высота в пикселях, `payload` = ширина\|высота<<32 в сотых долях мм | Ответ на `Hello`. Физический размер нужен для порогов жестов ([16-surfaces.md](16-surfaces.md)) |
 | `Revoked` | `value` = причина: `NotActive`, `SessionInactive`, `Replaced`, `Version`, `Shutdown` | Последнее сообщение перед закрытием соединения |
-| `ModeChanged` | `value` = `display`/`native`, `payload` = причина: владелец, recovery, сон, ошибка | Смена режима. В `native` сессия не рисует |
+| `ModeChanged` | `value` = `display`/`native`, `payload` = причина: владелец, recovery, блокировка экрана, сон, ошибка | Смена режима. В `native` сессия не рисует |
 | `Touch` | `value` = фаза (down/move/up/cancel), `payload` = `ContactId`, `x`,`y` = координаты в логических пикселях | Касание |
 | `KeyEvent` | `value` = код, `x` = фаза | Событие отслеживаемой клавиши (`WatchKey`) |
 | `BufferReleased` | `value` = индекс, `payload` = номер кадра | Буфер снова свободен для рисования |
