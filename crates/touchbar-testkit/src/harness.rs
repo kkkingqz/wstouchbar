@@ -20,6 +20,9 @@ struct Job {
 }
 pub struct Harness {
     core: Core,
+    catalog: Catalog,
+    checker: Option<InvariantChecker>,
+    pub invariant_error: Option<InvariantViolation>,
     clock: Timestamp,
     logic_timeout_ms: u64,
     next_job: u64,
@@ -42,6 +45,9 @@ impl Harness {
         let recorder = Recorder::new(&core);
         Self {
             core,
+            catalog: Catalog::default(),
+            checker: None,
+            invariant_error: None,
             recorder,
             clock: Timestamp(0),
             logic_timeout_ms,
@@ -57,6 +63,19 @@ impl Harness {
             effects: FakeEffects::default(),
             renderer: FakeRenderer::default(),
         }
+    }
+    pub fn enable_invariant_checks(&mut self) {
+        self.checker = Some(InvariantChecker::new(self.core.snapshot()));
+        self.invariant_error = None;
+    }
+    pub fn invariant_coverage(&self) -> InvariantCoverage {
+        self.checker.as_ref().expect("checks enabled").coverage
+    }
+    pub fn finish_invariant_checks(&self) -> Result<(), InvariantViolation> {
+        self.checker
+            .as_ref()
+            .expect("invariant checks enabled")
+            .finish()
     }
     pub fn now(&self) -> Timestamp {
         self.clock
@@ -142,6 +161,14 @@ impl Harness {
         self.clock = end;
     }
     fn deliver(&mut self, input: Input) {
+        if let Input::Catalog(catalog) = &input
+            && catalog
+                .validate()
+                .iter()
+                .all(|i| i.code == CatalogIssueCode::ProfileConflict)
+        {
+            self.catalog = catalog.clone();
+        }
         if let Input::SubscriptionLost { subscription, .. } = &input {
             self.effects.subscriptions.remove(subscription);
         }
@@ -159,6 +186,15 @@ impl Harness {
             input,
             outputs: outputs.clone(),
         });
+        if let Some(checker) = &mut self.checker
+            && let Err(error) = checker.observe(
+                self.trace.last().expect("recorded input"),
+                &self.core.snapshot(),
+            )
+            && self.invariant_error.is_none()
+        {
+            self.invariant_error = Some(error);
+        }
         for command in outputs {
             self.command(command);
         }
@@ -172,14 +208,12 @@ impl Harness {
                 ..
             } => {
                 let spec = self
-                    .core
-                    .snapshot()
-                    .surfaces
-                    .into_iter()
-                    .flat_map(|s| s.scene.items)
-                    .find(|i| i.instance == instance)
-                    .expect("created instance in scene")
-                    .set;
+                    .catalog
+                    .sets
+                    .iter()
+                    .find(|s| s.reference == set)
+                    .expect("created instance in accepted catalog")
+                    .clone();
                 let description = self.logic.description(&spec);
                 self.runtime_sets.insert(instance, set);
                 let persisted = self
@@ -356,7 +390,8 @@ impl Harness {
             | Output::DesktopKey { .. }
             | Output::WatchKeys { .. }
             | Output::Backlight { .. }
-            | Output::Log { .. } => {}
+            | Output::Log { .. }
+            | Output::CaptureFinished { .. } => {}
         }
     }
     pub fn subscription_after(

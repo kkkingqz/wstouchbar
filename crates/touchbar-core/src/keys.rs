@@ -1,4 +1,4 @@
-use crate::{DesktopCapabilities, Mode, Output};
+use crate::{DesktopCapabilities, KeyDestination, KeyLeaseSnapshot, Mode, Output};
 use serde::{Deserialize, Serialize};
 use touchbar_model::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,18 +10,7 @@ pub enum KeyOwner {
         contact: ContactId,
     },
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-enum Destination {
-    Surface,
-    Desktop,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Lease {
-    owner: KeyOwner,
-    surface: SurfaceId,
-    key: SystemKey,
-    destination: Destination,
-}
+type Lease = KeyLeaseSnapshot;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct KeyTracker {
     leases: Vec<Lease>,
@@ -31,16 +20,16 @@ impl Lease {
     fn same_target(&self, other: &Self) -> bool {
         self.key == other.key
             && self.destination == other.destination
-            && (self.destination == Destination::Desktop || self.surface == other.surface)
+            && (self.destination == KeyDestination::Desktop || self.surface == other.surface)
     }
     fn output(&self, phase: KeyPhase) -> Output {
         match self.destination {
-            Destination::Surface => Output::SendKey {
+            KeyDestination::Surface => Output::SendKey {
                 surface: self.surface,
                 key: self.key,
                 phase,
             },
-            Destination::Desktop => Output::DesktopKey {
+            KeyDestination::Desktop => Output::DesktopKey {
                 surface: self.surface,
                 key: self.key,
                 phase,
@@ -49,6 +38,9 @@ impl Lease {
     }
 }
 impl KeyTracker {
+    pub fn snapshot(&self) -> Vec<KeyLeaseSnapshot> {
+        self.leases.clone()
+    }
     pub fn press(
         &mut self,
         owner: KeyOwner,
@@ -61,9 +53,9 @@ impl KeyTracker {
             return Err(EffectError::Unavailable);
         }
         let destination = if surface.caps.inject_keys {
-            Destination::Surface
+            KeyDestination::Surface
         } else if desktop.key {
-            Destination::Desktop
+            KeyDestination::Desktop
         } else {
             return Err(EffectError::Unsupported);
         };
@@ -95,7 +87,7 @@ impl KeyTracker {
         self.release_matching(|l| l.surface == surface)
     }
     pub fn release_desktop(&mut self) -> Vec<Output> {
-        self.release_matching(|l| l.destination == Destination::Desktop)
+        self.release_matching(|l| l.destination == KeyDestination::Desktop)
     }
     pub fn release_key(&mut self, owner: KeyOwner, key: SystemKey) -> Vec<Output> {
         self.release_matching(|l| l.owner == owner && l.key == key)

@@ -154,6 +154,7 @@ impl Core {
             .map(subscriptions::Subscription::snapshot)
             .collect();
         CoreSnapshot {
+            key_leases: self.keys.snapshot(),
             captures: self
                 .surfaces
                 .iter()
@@ -343,18 +344,13 @@ impl Core {
                     .get(&surface)
                     .is_some_and(|s| s.info.caps.modes && s.mode != mode)
                 {
+                    if mode == Mode::Native {
+                        self.cancel_surface(surface, CancelReason::Mode, &mut output);
+                    }
                     self.reset_binding_source(KeySource::Surface(surface), &mut output);
                     if mode == Mode::Native {
                         self.clear_target_holds(surface, &mut output);
                     }
-                }
-                if mode == Mode::Native
-                    && self
-                        .surfaces
-                        .get(&surface)
-                        .is_some_and(|s| s.info.caps.modes && s.mode != mode)
-                {
-                    self.cancel_surface(surface, CancelReason::Mode, &mut output);
                 }
                 if let Some(state) = self.surfaces.get_mut(&surface) {
                     if !state.info.caps.modes {
@@ -793,8 +789,8 @@ impl Core {
         }
     }
     fn remove_surface(&mut self, id: SurfaceId, reason: CancelReason, output: &mut Vec<Output>) {
-        self.reset_binding_source(KeySource::Surface(id), output);
         self.cancel_surface(id, reason, output);
+        self.reset_binding_source(KeySource::Surface(id), output);
         self.close_presentation(id, output);
         output.extend(self.keys.release_surface(id));
         if let Some(surface) = self.surfaces.remove(&id) {

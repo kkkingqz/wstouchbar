@@ -1,4 +1,4 @@
-use crate::{ProfileSwitch, Resolution};
+use crate::{KeyOwner, ProfileSwitch, Resolution};
 use serde::{Deserialize, Serialize};
 use touchbar_model::*;
 
@@ -218,6 +218,11 @@ pub enum Input {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Output {
+    /// Observation only; executors do not act on this event.
+    CaptureFinished {
+        capture: CaptureSnapshot,
+        completion: CaptureCompletion,
+    },
     CallLogic {
         instance: InstanceId,
         call: CallId,
@@ -303,6 +308,7 @@ pub struct SurfaceSnapshot {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoreSnapshot {
+    pub key_leases: Vec<KeyLeaseSnapshot>,
     pub facts: Facts,
     pub surfaces: Vec<SurfaceSnapshot>,
     pub plugins: Vec<PluginId>,
@@ -349,4 +355,24 @@ pub struct LayerSnapshot {
     pub set: SetRef,
     pub latched: bool,
     pub held: Vec<(KeySource, String)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CaptureCompletion {
+    Up,
+    Cancel(CancelReason),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyDestination {
+    Surface,
+    Desktop,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyLeaseSnapshot {
+    pub owner: KeyOwner,
+    pub surface: SurfaceId,
+    pub key: SystemKey,
+    pub destination: KeyDestination,
 }

@@ -22,6 +22,16 @@ pub(crate) struct Capture {
     #[serde(with = "touchbar_model::wire_float::f32")]
     unit_px: f32,
 }
+impl Capture {
+    fn snapshot(&self) -> CaptureSnapshot {
+        CaptureSnapshot {
+            id: self.identity,
+            surface: self.surface,
+            contact: self.contact,
+            target: self.target.clone(),
+        }
+    }
+}
 impl Core {
     pub(crate) fn touch(
         &mut self,
@@ -72,6 +82,10 @@ impl Core {
                 .insert(contact, capture);
             return;
         }
+        output.push(Output::CaptureFinished {
+            capture: capture.snapshot(),
+            completion: CaptureCompletion::Up,
+        });
         if let Some(timer) = capture.hold_timer.take() {
             self.timers.cancel(timer);
         }
@@ -644,6 +658,10 @@ impl Core {
         else {
             return;
         };
+        output.push(Output::CaptureFinished {
+            capture: capture.snapshot(),
+            completion: CaptureCompletion::Cancel(reason),
+        });
         if let Some(timer) = capture.hold_timer {
             self.timers.cancel(timer);
         }

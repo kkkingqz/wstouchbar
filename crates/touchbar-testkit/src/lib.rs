@@ -15,3 +15,6 @@ pub use renderer::*;
 mod scenario;
 pub use scenario::*;
 pub mod fixtures;
+mod invariants;
+pub use invariants::*;
+pub mod strategies;

@@ -1,0 +1,84 @@
+{
+  "profiles": 2,
+  "surfaces": [
+    {
+      "id": 1,
+      "name": "touchbar",
+      "kind": "touchbar",
+      "width_px": 2008,
+      "height_px": 60,
+      "px_per_mm": 2.0,
+      "caps": {
+        "modes": true,
+        "backlight": false,
+        "watch_keys": true,
+        "inject_keys": false,
+        "damage": false
+      }
+    },
+    {
+      "id": 2,
+      "name": "window:test2",
+      "kind": "window",
+      "width_px": 2170,
+      "height_px": 120,
+      "px_per_mm": 2.0,
+      "caps": {
+        "modes": true,
+        "backlight": false,
+        "watch_keys": true,
+        "inject_keys": false,
+        "damage": false
+      }
+    }
+  ],
+  "logic_delay": 2,
+  "render_delay": 1,
+  "effect_delay": 1,
+  "all_layers": false,
+  "probe_panel": false,
+  "probe_pending": false,
+  "probe_fault": false,
+  "steps": [
+    {
+      "Effect": {
+        "success": false
+      }
+    },
+    {
+      "Touch": {
+        "surface": 0,
+        "contact": 1,
+        "phase": 0,
+        "widget": 0,
+        "dx": 0
+      }
+    },
+    {
+      "Touch": {
+        "surface": 1,
+        "contact": 1,
+        "phase": 0,
+        "widget": 0,
+        "dx": 0
+      }
+    },
+    {
+      "Fn": {
+        "surface": 1,
+        "pressed": true
+      }
+    },
+    {
+      "Subscription": {
+        "surface": 1
+      }
+    },
+    {
+      "App": 1
+    },
+    {
+      "Advance": 3
+    }
+  ]
+}
