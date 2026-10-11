@@ -82,7 +82,7 @@ T12 можно начать сразу после T4 и наращивать п�
 ### T3. touchbar-bindings
 
 - **Модель:** `Trigger` (`key`, `keys`, `sequence`; жесты `press`, `release`, `while-held`, `hold`, `tap`, `multi-tap`), `Binding<A> { id, trigger, when, action: A }` — действие обобщённое: слои в сессии, режимы в `touchbard`.
-- **Автомат:** `BindingEngine<A>::handle(now, KeyInput) -> Vec<BindingEvent<A>>` (`Fired`, `Began`, `Ended` для `while-held`), `next_deadline()` для таймеров `hold`, `tap` и `within-ms`, `reset()`.
+- **Автомат:** `BindingEngine<A>::handle(now, KeyInput) -> Vec<BindingEvent<A>>` (`Fired`, `Began`, `Ended` для `while-held`), `advance(now)` для времени, `set_facts(now, Facts)` для условий (D42), `next_deadline()` для таймеров `hold`, `tap` и `within-ms`, `reset()`.
 - **Проверка набора:** одинаковые триггеры с разными действиями без разных `when` — ошибка.
 - **Перенос:** `touchbard/src/recovery.rs` (удержание Fn: одно удержание переключает один раз, прерванное не срабатывает) — первый тестовый сценарий.
 

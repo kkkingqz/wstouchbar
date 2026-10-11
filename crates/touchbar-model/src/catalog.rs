@@ -213,12 +213,6 @@ impl Catalog {
             "profiles",
             &mut issues,
         );
-        duplicates(
-            self.bindings.iter().map(|b| &b.id),
-            CatalogIssueCode::DuplicateBinding,
-            "bindings",
-            &mut issues,
-        );
         for set in &self.sets {
             let location = set.reference.to_string();
             if self.plugin(&set.reference.plugin).is_none() {
@@ -403,16 +397,25 @@ impl Catalog {
                 }
             }
         }
-        for binding in &self.bindings {
-            if binding.id.is_empty() || binding.trigger.validate().is_err() {
-                issue(
-                    &mut issues,
+        for binding_issue in validate_bindings(&self.bindings) {
+            let (code, location, detail) = match binding_issue {
+                BindingIssue::DuplicateId(id) => (
+                    CatalogIssueCode::DuplicateBinding,
+                    id,
+                    "duplicate binding id".to_owned(),
+                ),
+                BindingIssue::Invalid { id, message } => {
+                    (CatalogIssueCode::InvalidBinding, id, message)
+                }
+                BindingIssue::Conflict { first, second } => (
                     CatalogIssueCode::InvalidBinding,
-                    &binding.id,
-                    "invalid id or trigger",
-                );
-            }
-            check_condition(binding.when.as_ref(), &binding.id, &mut issues);
+                    first,
+                    format!("conflicts with {second}"),
+                ),
+            };
+            issue(&mut issues, code, &location, &detail);
+        }
+        for binding in &self.bindings {
             if let LayerOperation::Layer(reference) | LayerOperation::ToggleLayer(reference) =
                 &binding.action.operation
                 && !self.sets.iter().any(|s| &s.reference == reference)

@@ -299,3 +299,24 @@ fn duplicate_binding_ids_are_rejected() {
     c.bindings = vec![b.clone(), b];
     rejects(&c, CatalogIssueCode::DuplicateBinding);
 }
+#[test]
+fn conflicting_binding_triggers_are_reported_by_catalog_validation() {
+    let mut c = catalog();
+    let b = Binding {
+        id: "fn".into(),
+        trigger: Trigger::Key(KeyTrigger {
+            keys: vec![WatchKey::Fn],
+            gesture: KeyGesture::Press,
+        }),
+        when: None,
+        action: LayerAction {
+            operation: LayerOperation::ClearLayers,
+            surfaces: LayerSurfaces::Source,
+        },
+    };
+    let mut other = b.clone();
+    other.id = "fn-other".into();
+    other.action.surfaces = LayerSurfaces::All;
+    c.bindings = vec![b, other];
+    rejects(&c, CatalogIssueCode::InvalidBinding);
+}

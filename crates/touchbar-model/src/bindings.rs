@@ -98,3 +98,66 @@ pub struct LayerAction {
     pub operation: LayerOperation,
     pub surfaces: LayerSurfaces,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BindingIssue {
+    DuplicateId(String),
+    Invalid { id: String, message: String },
+    Conflict { first: String, second: String },
+}
+
+pub fn validate_bindings<A: PartialEq>(bindings: &[Binding<A>]) -> Vec<BindingIssue> {
+    let mut issues = vec![];
+    let mut seen = BTreeSet::new();
+    for binding in bindings {
+        if !seen.insert(&binding.id) {
+            issues.push(BindingIssue::DuplicateId(binding.id.clone()));
+        }
+        if binding.id.is_empty() {
+            issues.push(BindingIssue::Invalid {
+                id: binding.id.clone(),
+                message: "binding id is empty".into(),
+            });
+        }
+        if let Err(error) = binding.trigger.validate() {
+            issues.push(BindingIssue::Invalid {
+                id: binding.id.clone(),
+                message: error.to_string(),
+            });
+        }
+        if let Some(condition) = &binding.when
+            && let Err(error) = condition.validate()
+        {
+            issues.push(BindingIssue::Invalid {
+                id: binding.id.clone(),
+                message: error.to_string(),
+            });
+        }
+    }
+    fn normalized(trigger: &Trigger) -> Trigger {
+        let mut trigger = trigger.clone();
+        match &mut trigger {
+            Trigger::Key(key) => key.keys.sort(),
+            Trigger::Sequence { steps, .. } => {
+                for step in steps {
+                    step.keys.sort();
+                }
+            }
+        }
+        trigger
+    }
+    for (i, a) in bindings.iter().enumerate() {
+        for b in &bindings[i + 1..] {
+            if normalized(&a.trigger) == normalized(&b.trigger)
+                && a.when == b.when
+                && a.action != b.action
+            {
+                issues.push(BindingIssue::Conflict {
+                    first: a.id.clone(),
+                    second: b.id.clone(),
+                });
+            }
+        }
+    }
+    issues
+}
