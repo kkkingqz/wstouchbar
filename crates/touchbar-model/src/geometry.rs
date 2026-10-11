@@ -3,14 +3,20 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Point {
+    #[serde(with = "crate::wire_float::f32")]
     pub x: f32,
+    #[serde(with = "crate::wire_float::f32")]
     pub y: f32,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
+    #[serde(with = "crate::wire_float::f32")]
     pub x: f32,
+    #[serde(with = "crate::wire_float::f32")]
     pub y: f32,
+    #[serde(with = "crate::wire_float::f32")]
     pub width: f32,
+    #[serde(with = "crate::wire_float::f32")]
     pub height: f32,
 }
 impl Rect {

@@ -18,7 +18,7 @@ impl From<String> for FactName {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Scalar {
     Boolean(bool),
-    Number(f64),
+    Number(#[serde(with = "crate::wire_float::f64")] f64),
     Text(String),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub type RecordValue = BTreeMap<String, Scalar>;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FactValue {
     Boolean(bool),
-    Number(f64),
+    Number(#[serde(with = "crate::wire_float::f64")] f64),
     Text(String),
     List(Vec<String>),
     Records(Vec<RecordValue>),

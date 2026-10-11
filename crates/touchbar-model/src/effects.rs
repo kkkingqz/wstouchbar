@@ -85,6 +85,7 @@ impl SpawnSpec {
 pub enum Effect {
     AudioSetVolume {
         target: AudioTarget,
+        #[serde(with = "crate::wire_float::f64")]
         level: f64,
     },
     AudioSetMute {
@@ -102,6 +103,7 @@ pub enum Effect {
         app: Option<String>,
     },
     DesktopBrightness {
+        #[serde(with = "crate::wire_float::f64")]
         level: f64,
     },
     DesktopWorkspace {
@@ -282,6 +284,7 @@ pub struct SubscriptionSpec {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioState {
     pub available: bool,
+    #[serde(with = "crate::wire_float::f64")]
     pub volume: f64,
     pub muted: bool,
     pub name: String,

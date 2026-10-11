@@ -15,6 +15,7 @@ pub struct CoreConfig {
     pub tap_slop: Mm,
     pub pan_threshold: Mm,
     pub swipe_distance: Mm,
+    #[serde(with = "touchbar_model::wire_float::f32")]
     pub swipe_speed_mm_s: f32,
     pub fallback_distance: Mm,
     pub logic_soft_ms: u64,

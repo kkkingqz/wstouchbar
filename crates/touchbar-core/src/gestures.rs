@@ -22,7 +22,9 @@ pub(crate) struct GestureArena {
     pub origin: Point,
     pub last: Point,
     began: Timestamp,
+    #[serde(with = "touchbar_model::wire_float::f64")]
     max_distance: f64,
+    #[serde(with = "touchbar_model::wire_float::f32")]
     density: f32,
     hold_ms: Option<u64>,
     pan: bool,

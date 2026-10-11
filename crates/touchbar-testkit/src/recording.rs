@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use touchbar_core::*;
 use touchbar_model::Timestamp;
 
-pub const DUMP_VERSION: u32 = 1;
+pub const DUMP_VERSION: u32 = 2;
 pub const CHECKPOINT_INTERVAL: usize = 2000;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraceEntry {

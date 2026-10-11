@@ -14,9 +14,16 @@ pub struct PluginSpec {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WidgetKind {
     Button,
-    Slider { minimum: f64, maximum: f64 },
+    Slider {
+        #[serde(with = "crate::wire_float::f64")]
+        minimum: f64,
+        #[serde(with = "crate::wire_float::f64")]
+        maximum: f64,
+    },
     Scrubber,
-    Key { key: SystemKey },
+    Key {
+        key: SystemKey,
+    },
     Canvas,
     Noninteractive,
 }

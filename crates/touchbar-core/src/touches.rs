@@ -13,10 +13,13 @@ pub(crate) struct Capture {
     arena: GestureArena,
     hold_timer: Option<TimerId>,
     slider_emitted: bool,
+    #[serde(with = "touchbar_model::wire_float::option_f64")]
     slider_pending: Option<f64>,
+    #[serde(with = "touchbar_model::wire_float::option_f64")]
     slider_last: Option<f64>,
     scrubber_layout: Option<ScrubberLayout>,
     scrubber_start: ScrubberState,
+    #[serde(with = "touchbar_model::wire_float::f32")]
     unit_px: f32,
 }
 impl Core {

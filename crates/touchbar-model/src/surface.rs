@@ -76,6 +76,7 @@ pub struct SurfaceInfo {
     pub kind: SurfaceKind,
     pub width_px: u32,
     pub height_px: u32,
+    #[serde(with = "crate::wire_float::f32")]
     pub px_per_mm: f32,
     pub caps: SurfaceCaps,
 }

@@ -18,7 +18,7 @@ pub struct UnitSize {
     pub axis: Axis,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Mm(pub f32);
+pub struct Mm(#[serde(with = "crate::wire_float::f32")] pub f32);
 impl Mm {
     pub fn to_px(self, px_per_mm: f32) -> f32 {
         self.0 * px_per_mm
@@ -85,7 +85,7 @@ impl Serialize for Length {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.validate().map_err(serde::ser::Error::custom)?;
         match *self {
-            Self::Unit(v) => s.serialize_f32(v),
+            Self::Unit(v) => crate::wire_float::f32::serialize(&v, s),
             Self::Percent { value, axis } => s.serialize_str(&format!("{value}{}", axis.suffix())),
         }
     }

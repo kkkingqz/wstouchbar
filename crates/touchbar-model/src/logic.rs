@@ -44,6 +44,7 @@ pub struct ActionEvent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LogicContext {
     pub surface_kind: String,
+    #[serde(with = "crate::wire_float::f32")]
     pub slot_width: f32,
     pub representation: String,
     pub color_scheme: String,
@@ -152,9 +153,13 @@ pub struct LogicUpdate {
 pub enum CanvasColor {
     Role(ColorRole),
     Rgba {
+        #[serde(with = "crate::wire_float::f32")]
         red: f32,
+        #[serde(with = "crate::wire_float::f32")]
         green: f32,
+        #[serde(with = "crate::wire_float::f32")]
         blue: f32,
+        #[serde(with = "crate::wire_float::f32")]
         alpha: f32,
     },
 }
@@ -174,6 +179,7 @@ pub enum ColorRole {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CanvasPaint {
     pub color: CanvasColor,
+    #[serde(with = "crate::wire_float::f32")]
     pub opacity: f32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -193,39 +199,46 @@ pub enum TextAlign {
 pub enum CanvasCommand {
     FillRect {
         rect: crate::Rect,
+        #[serde(with = "crate::wire_float::f32")]
         radius: f32,
         paint: CanvasPaint,
     },
     Line {
         start: crate::Point,
         end: crate::Point,
+        #[serde(with = "crate::wire_float::f32")]
         width: f32,
         paint: CanvasPaint,
     },
     Polyline {
         points: Vec<crate::Point>,
+        #[serde(with = "crate::wire_float::f32")]
         width: f32,
         paint: CanvasPaint,
     },
     FillCircle {
         center: crate::Point,
+        #[serde(with = "crate::wire_float::f32")]
         radius: f32,
         paint: CanvasPaint,
     },
     Text {
         rect: crate::Rect,
         text: String,
+        #[serde(with = "crate::wire_float::f32")]
         size: f32,
         paint: CanvasPaint,
         align: TextAlign,
     },
     FillLinearGradientRect {
         rect: crate::Rect,
+        #[serde(with = "crate::wire_float::f32")]
         radius: f32,
         gradient: CanvasLinearGradient,
     },
     StrokePath {
         segments: Vec<CanvasPathSegment>,
+        #[serde(with = "crate::wire_float::f32")]
         width: f32,
         paint: CanvasPaint,
     },

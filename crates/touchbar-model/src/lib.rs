@@ -20,3 +20,5 @@ mod bindings;
 mod catalog;
 pub use bindings::*;
 pub use catalog::*;
+
+pub mod wire_float;

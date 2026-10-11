@@ -74,6 +74,7 @@ pub struct SceneItem {
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScrubberState {
+    #[serde(with = "touchbar_model::wire_float::f32")]
     pub offset_px: f32,
     pub highlighted: Option<String>,
     pub selected: Option<String>,
@@ -83,6 +84,7 @@ pub struct WidgetInteraction {
     pub widget: WidgetId,
     pub record_key: Option<String>,
     pub pressed: bool,
+    #[serde(with = "touchbar_model::wire_float::option_f64")]
     pub value: Option<f64>,
     pub scrubber: ScrubberState,
 }
@@ -97,6 +99,7 @@ pub struct ScrubberLayout {
     pub instance: InstanceId,
     pub widget: WidgetId,
     pub viewport: Rect,
+    #[serde(with = "touchbar_model::wire_float::f32")]
     pub content_width: f32,
     pub items: Vec<ScrubberItemGeometry>,
 }
@@ -137,7 +140,9 @@ pub enum Input {
         surface: SurfaceId,
         contact: ContactId,
         phase: TouchPhase,
+        #[serde(with = "touchbar_model::wire_float::f32")]
         x: f32,
+        #[serde(with = "touchbar_model::wire_float::f32")]
         y: f32,
     },
     Key {
@@ -259,6 +264,7 @@ pub enum Output {
     },
     Backlight {
         surface: SurfaceId,
+        #[serde(with = "touchbar_model::wire_float::f32")]
         limit: f32,
     },
     Render {
