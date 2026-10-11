@@ -108,6 +108,7 @@ fn init(c: &mut Core, id: InstanceId) -> CallId {
     let (call, invocation) = invocation(&c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: description(),
         },
@@ -312,6 +313,11 @@ fn load_failure_before_describe_uses_backoff_and_stale_instance_fault_is_ignored
     let out = c.handle(at, Input::Timer { id: timer });
     let new = c.snapshot().instances[0].id;
     assert!(out.contains(&Output::CreateInstance {
+        persist_key: PersistKey {
+            plugin: "p".parse().unwrap(),
+            surface: "headless:1".parse().unwrap(),
+            scope: PersistScope::ProfileSlot("main".parse().unwrap())
+        },
         instance: new,
         surface: SurfaceId(1),
         plugin: "p".parse().unwrap(),
@@ -361,6 +367,7 @@ fn description_mismatch_faults_without_retry_until_catalog_reload() {
         let out = c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: id,
                 description: desc,
             },
@@ -480,6 +487,7 @@ fn duplicate_describe_and_duplicate_response_never_issue_another_init_or_shown()
         c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: id,
                 description: description()
             }
@@ -590,6 +598,7 @@ fn action_payload_schema_must_match_physical_value_changed_events() {
         let out = c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: id,
                 description: desc,
             },
@@ -618,6 +627,7 @@ fn repeated_children_resolve_record_bindings_in_the_parent_records_schema() {
     let out = c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: description(),
         },
@@ -636,6 +646,7 @@ fn nonfinite_canvas_geometry_is_dropped_while_valid_state_is_applied() {
     let (call, _) = invocation(&c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: desc,
         },
@@ -694,6 +705,7 @@ fn duplicate_description_fields_and_unscoped_record_bindings_are_schema_faults()
         c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: id,
                 description: desc,
             },

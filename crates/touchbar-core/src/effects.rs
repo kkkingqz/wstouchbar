@@ -9,6 +9,19 @@ pub(crate) struct Request {
     running: bool,
     timer: Option<TimerId>,
 }
+impl Request {
+    pub(crate) fn snapshot(&self, timers: &TimerRegistry<CoreTimer>) -> RequestSnapshot {
+        RequestSnapshot {
+            id: self.id,
+            surface: self.surface,
+            tag: self.tag.clone(),
+            effect: self.effect.clone(),
+            policy: self.policy.clone(),
+            running: self.running,
+            deadline: self.timer.and_then(|id| timers.deadline(id)),
+        }
+    }
+}
 impl Core {
     pub(crate) fn request_update(
         &mut self,

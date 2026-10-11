@@ -97,6 +97,7 @@ fn add(c: &mut Core, n: u64) {
     let init = c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: LogicDescription {
                 actions: vec![(
@@ -586,6 +587,7 @@ fn initial_hidden_only_starts_background_and_show_starts_visible_subscription() 
     let init = c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: LogicDescription {
                 actions: vec![(
@@ -874,6 +876,7 @@ fn default_spawn_limits_apply_across_twenty_four_instances() {
         let init = c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: *id,
                 description: LogicDescription {
                     actions: vec![(

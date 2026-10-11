@@ -2,6 +2,18 @@ use crate::{ProfileSwitch, Resolution};
 use serde::{Deserialize, Serialize};
 use touchbar_model::*;
 
+/// Stable address of persisted fields, independent of runtime generations.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistKey {
+    pub plugin: PluginId,
+    pub surface: SurfaceName,
+    pub scope: PersistScope,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PersistScope {
+    ProfileSlot(SlotId),
+    Layer(SetRef),
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
     Display,
@@ -26,6 +38,11 @@ pub struct InstanceSnapshot {
     pub queue_len: usize,
     pub retry_at: Option<Timestamp>,
     pub fault: Option<String>,
+    pub persist_key: PersistKey,
+    pub call: Option<CallSnapshot>,
+    pub queue: Vec<LogicCall>,
+    pub requests: Vec<RequestSnapshot>,
+    pub subscriptions: Vec<SubscriptionSnapshot>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum KeySource {
@@ -152,6 +169,7 @@ pub enum Input {
     LogicDescribed {
         instance: InstanceId,
         description: LogicDescription,
+        persisted: StatePatch,
     },
     LogicUpdate {
         instance: InstanceId,
@@ -204,6 +222,7 @@ pub enum Output {
         surface: SurfaceId,
         plugin: PluginId,
         set: SetRef,
+        persist_key: PersistKey,
     },
     DisposeInstance {
         instance: InstanceId,
@@ -248,6 +267,7 @@ pub enum Output {
     },
     Persist {
         instance: InstanceId,
+        key: PersistKey,
         fields: StatePatch,
     },
     SetTimer {
@@ -271,6 +291,8 @@ pub struct SurfaceSnapshot {
     pub scene: Scene,
     pub resolution: Resolution,
     pub profile: ProfileSwitch,
+    pub layers: Vec<LayerSnapshot>,
+    pub presentation: Option<PresentationScene>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoreSnapshot {
@@ -280,10 +302,44 @@ pub struct CoreSnapshot {
     pub now: Timestamp,
     pub instances: Vec<InstanceSnapshot>,
     pub captures: Vec<CaptureSnapshot>,
+    pub requests: Vec<RequestSnapshot>,
+    pub subscriptions: Vec<SubscriptionSnapshot>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CaptureSnapshot {
+    pub id: CaptureId,
     pub surface: SurfaceId,
     pub contact: ContactId,
     pub target: HitTarget,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CallSnapshot {
+    pub id: CallId,
+    pub invocation: LogicCall,
+    pub discard_update: bool,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RequestSnapshot {
+    pub id: RequestId,
+    pub surface: SurfaceId,
+    pub tag: String,
+    pub effect: Effect,
+    pub policy: EffectPolicy,
+    pub running: bool,
+    pub deadline: Option<Timestamp>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SubscriptionSnapshot {
+    pub owner: InstanceId,
+    pub spec: SubscriptionSpec,
+    pub active: Option<SubscriptionId>,
+    pub failures: u32,
+    pub retry_at: Option<Timestamp>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayerSnapshot {
+    pub set: SetRef,
+    pub latched: bool,
+    pub held: Vec<(KeySource, String)>,
 }

@@ -1,5 +1,5 @@
 use crate::presentations::PhysicalContext;
-use crate::{CoreConfig, InstanceSnapshot, InstanceStatus, LogLevel, Output};
+use crate::{CoreConfig, InstanceSnapshot, InstanceStatus, LogLevel, Output, PersistKey};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, VecDeque};
 use touchbar_model::*;
@@ -26,6 +26,7 @@ pub(crate) struct Instance {
     pub id: InstanceId,
     pub surface: SurfaceId,
     pub slot: SlotId,
+    pub persist_key: PersistKey,
     pub set: SetSpec,
     pub status: InstanceStatus,
     pub state: StatePatch,
@@ -47,11 +48,13 @@ impl Instance {
         slot: SlotId,
         set: SetSpec,
         visible: bool,
+        persist_key: PersistKey,
     ) -> Self {
         Self {
             id,
             surface,
             slot,
+            persist_key,
             status: if set.logic.is_some() {
                 InstanceStatus::Loading
             } else if visible {
@@ -84,6 +87,15 @@ impl Instance {
             queue_len: self.queue.len(),
             retry_at: self.retry_at,
             fault: self.fault.clone(),
+            persist_key: self.persist_key.clone(),
+            call: self.in_flight.as_ref().map(|c| crate::CallSnapshot {
+                id: c.call,
+                invocation: c.invocation.clone(),
+                discard_update: c.discard_update,
+            }),
+            queue: self.queue.iter().map(|c| c.invocation.clone()).collect(),
+            requests: vec![],
+            subscriptions: vec![],
         }
     }
     pub fn creation(&self) -> Option<Output> {
@@ -95,7 +107,22 @@ impl Instance {
                 surface: self.surface,
                 plugin: plugin.clone(),
                 set: self.set.reference.clone(),
+                persist_key: self.persist_key.clone(),
             })
+    }
+    pub fn accepts_description(&self) -> bool {
+        self.status == InstanceStatus::Loading && self.description.is_none() && self.runtime_alive
+    }
+    pub fn persistent_fields(&self) -> StatePatch {
+        self.state
+            .iter()
+            .filter(|(name, _)| {
+                self.description
+                    .as_ref()
+                    .is_some_and(|d| d.state.iter().any(|f| &f.name == name && f.persist))
+            })
+            .cloned()
+            .collect()
     }
     pub fn describe(
         &mut self,
@@ -120,6 +147,7 @@ impl Instance {
                     .state
                     .iter()
                     .any(|f| &f.name == name && f.persist && f.kind.accepts(value))
+                    && value_within_limits(value, config)
             })
             .collect();
         self.description = Some(description);
@@ -426,7 +454,10 @@ impl Instance {
         output
     }
 }
-fn validate_description(set: &SetSpec, description: &LogicDescription) -> Result<(), String> {
+pub(crate) fn validate_description(
+    set: &SetSpec,
+    description: &LogicDescription,
+) -> Result<(), String> {
     let mut actions = BTreeSet::new();
     for (name, _) in &description.actions {
         if name.is_empty() || !actions.insert(name) {
@@ -534,7 +565,7 @@ fn validate_widget(
     }
     Ok(())
 }
-fn value_within_limits(value: &StateValue, config: &CoreConfig) -> bool {
+pub(crate) fn value_within_limits(value: &StateValue, config: &CoreConfig) -> bool {
     match value {
         StateValue::Scalar(Scalar::Text(text)) => text.len() <= config.max_text_bytes,
         StateValue::Records(rows) => {
@@ -654,6 +685,11 @@ mod tests {
             "main".parse().unwrap(),
             set,
             true,
+            PersistKey {
+                plugin: "p".parse().unwrap(),
+                surface: "headless:1".parse().unwrap(),
+                scope: crate::PersistScope::ProfileSlot("main".parse().unwrap()),
+            },
         );
         let config = CoreConfig::default();
         instance.describe(LogicDescription::default(), vec![], Timestamp(0), &config);

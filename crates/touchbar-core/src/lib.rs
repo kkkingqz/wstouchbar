@@ -1,12 +1,15 @@
 //! Pure Touch Bar state machines: inputs in, commands out.
 #![forbid(unsafe_code)]
 mod api;
+mod checkpoints;
 mod config;
+pub use checkpoints::*;
 mod effects;
 mod gestures;
 mod instances;
 mod keys;
 mod layers;
+mod persistence;
 mod presentations;
 mod profiles;
 use presentations::Presentation;
@@ -55,6 +58,9 @@ struct SurfaceState {
 // Timer purposes are added by the dependent state machines starting in T5.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum CoreTimer {
+    Persist {
+        key: PersistKey,
+    },
     SubscriptionRetry {
         owner: InstanceId,
         tag: String,
@@ -81,7 +87,7 @@ enum CoreTimer {
         instance: InstanceId,
     },
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Core {
     config: CoreConfig,
     bindings: Vec<layers::SourceBindings>,
@@ -96,6 +102,7 @@ pub struct Core {
     next_subscription: u64,
     subscriptions: Vec<subscriptions::Subscription>,
     requests: Vec<effects::Request>,
+    persisted: Vec<persistence::PersistedState>,
     next_capture: u64,
     next_presentation: u64,
     instances: BTreeMap<u64, Instance>,
@@ -122,6 +129,7 @@ impl Core {
             next_subscription: 1,
             subscriptions: vec![],
             requests: vec![],
+            persisted: vec![],
             next_capture: 1,
             next_presentation: 1,
             instances: BTreeMap::new(),
@@ -132,19 +140,49 @@ impl Core {
         }
     }
     pub fn snapshot(&self) -> CoreSnapshot {
+        let requests: Vec<_> = self
+            .requests
+            .iter()
+            .map(|r| r.snapshot(&self.timers))
+            .collect();
+        let subscriptions: Vec<_> = self
+            .subscriptions
+            .iter()
+            .map(subscriptions::Subscription::snapshot)
+            .collect();
         CoreSnapshot {
             captures: self
                 .surfaces
                 .iter()
                 .flat_map(|(surface, s)| {
                     s.captures.iter().map(move |(contact, c)| CaptureSnapshot {
+                        id: c.identity,
                         surface: *surface,
                         contact: *contact,
                         target: c.target.clone(),
                     })
                 })
                 .collect(),
-            instances: self.instances.values().map(Instance::snapshot).collect(),
+            instances: self
+                .instances
+                .values()
+                .map(|i| {
+                    let mut instance = i.snapshot();
+                    instance.requests = requests
+                        .iter()
+                        .filter(|r| r.id.instance == i.id)
+                        .cloned()
+                        .collect();
+                    instance.subscriptions = subscriptions
+                        .iter()
+                        .filter(|s| s.owner == i.id)
+                        .cloned()
+                        .collect();
+                    instance
+                })
+                .collect(),
+            requests,
+            subscriptions,
             now: self.now,
             facts: self.facts.clone(),
             plugins: self.catalog.plugins.iter().map(|p| p.id.clone()).collect(),
@@ -159,6 +197,16 @@ impl Core {
                     scene: s.scene.clone(),
                     resolution: s.resolution.clone(),
                     profile: s.profile.clone(),
+                    layers: s
+                        .layers
+                        .iter()
+                        .map(|l| LayerSnapshot {
+                            set: l.set.clone(),
+                            latched: l.latched,
+                            held: l.held.iter().cloned().collect(),
+                        })
+                        .collect(),
+                    presentation: s.presentation.as_ref().map(|p| p.scene.clone()),
                 })
                 .collect(),
         }
@@ -431,6 +479,7 @@ impl Core {
             Input::Timer { id } => {
                 for (timer, task) in self.timers.take_due(now, id) {
                     match task {
+                        CoreTimer::Persist { key } => self.persist_timer(&key, timer, &mut output),
                         CoreTimer::SubscriptionRetry { owner, tag } => {
                             self.subscription_timer(owner, &tag, timer)
                         }
@@ -479,13 +528,29 @@ impl Core {
             Input::LogicDescribed {
                 instance,
                 description,
+                persisted,
             } => {
-                if let Some(current) = self
+                if let Some(key) = self
                     .instances
-                    .get_mut(&instance.number)
-                    .filter(|i| i.id == instance)
+                    .get(&instance.number)
+                    .filter(|i| i.id == instance && i.accepts_description())
+                    .map(|i| i.persist_key.clone())
                 {
-                    output.extend(current.describe(description, vec![], now, &self.config));
+                    let valid = instances::validate_description(
+                        &self.instances[&instance.number].set,
+                        &description,
+                    )
+                    .is_ok();
+                    let persisted = if valid {
+                        self.load_persisted(&key, persisted, &description)
+                    } else {
+                        persisted
+                    };
+                    let current = self
+                        .instances
+                        .get_mut(&instance.number)
+                        .expect("matched instance");
+                    output.extend(current.describe(description, persisted, now, &self.config));
                 }
             }
             Input::LogicUpdate {
@@ -499,6 +564,7 @@ impl Core {
                     .filter(|i| i.id == instance)
                     .and_then(|current| current.update(call, update, &self.config, &mut output));
                 if let Some((completed, update)) = accepted {
+                    self.persist_update(instance, &mut output);
                     self.request_update(instance, update.requests, update.cancel, &mut output);
                     self.subscription_update(instance, update.subscriptions, &mut output);
                     self.presentation_reply(instance, &completed, update.presentation, &mut output);
@@ -670,8 +736,29 @@ impl Core {
                     .expect("new placement")
                     .slot
                     .clone();
-                let logic =
-                    Instance::new(instance, surface, slot, set, state.mode == Mode::Display);
+                let item = state
+                    .scene
+                    .items
+                    .iter()
+                    .find(|i| i.instance == instance)
+                    .expect("placement");
+                let persist_key = PersistKey {
+                    plugin: set.reference.plugin.clone(),
+                    surface: state.info.name.clone(),
+                    scope: if matches!(item.plane, ScenePlane::Layer(_)) {
+                        PersistScope::Layer(set.reference.clone())
+                    } else {
+                        PersistScope::ProfileSlot(slot.clone())
+                    },
+                };
+                let logic = Instance::new(
+                    instance,
+                    surface,
+                    slot,
+                    set,
+                    state.mode == Mode::Display,
+                    persist_key,
+                );
                 output.extend(logic.creation());
                 self.instances.insert(instance.number, logic);
             }

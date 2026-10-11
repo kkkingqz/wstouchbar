@@ -227,6 +227,7 @@ fn setup() -> (Core, InstanceId, Vec<Output>) {
     let init = c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: LogicDescription {
                 actions,
@@ -294,6 +295,7 @@ fn init_cannot_open_presentation() {
     let init = c.handle(
         Timestamp(1),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id2,
             description: LogicDescription {
                 actions: catalog().sets[0]

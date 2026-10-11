@@ -881,6 +881,7 @@ fn layer_closes_panel_and_late_profile_reply_cannot_reopen_it() {
         let init = c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: id,
                 description: LogicDescription {
                     actions: vec![

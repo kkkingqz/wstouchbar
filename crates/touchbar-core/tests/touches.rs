@@ -109,6 +109,7 @@ fn setup(kind: WidgetKind, logic: bool) -> (Core, InstanceId) {
         let init = c.handle(
             Timestamp(0),
             Input::LogicDescribed {
+                persisted: vec![],
                 instance: id,
                 description: LogicDescription {
                     actions,
@@ -698,6 +699,7 @@ fn logic_hiding_pressed_widget_cancels_it_before_late_release() {
     let init = c.handle(
         Timestamp(0),
         Input::LogicDescribed {
+            persisted: vec![],
             instance: id,
             description: LogicDescription {
                 actions,

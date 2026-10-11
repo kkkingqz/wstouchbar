@@ -9,6 +9,15 @@ pub(crate) struct Subscription {
     timer: Option<TimerId>,
 }
 impl Subscription {
+    pub(crate) fn snapshot(&self) -> SubscriptionSnapshot {
+        SubscriptionSnapshot {
+            owner: self.owner,
+            spec: self.spec.clone(),
+            active: self.active,
+            failures: self.failures,
+            retry_at: self.retry_at,
+        }
+    }
     pub(crate) fn is_spawn(&self) -> bool {
         matches!(self.spec.kind, SubscriptionKind::SpawnLines(_))
     }

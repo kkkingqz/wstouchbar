@@ -26,7 +26,7 @@ impl Core {
 | `Fact{name, value \| absent}` | бэкенд рабочего стола, `touchbar-apps`, модули media и audio |
 | `DesktopCapabilities{key}` | оболочка: доступность ввода клавиш из `BackendReady` рабочего стола; при потере возможности ядро отпускает удерживаемые клавиши этого маршрута |
 | `Catalog(PluginCatalog)` | загрузчик плагинов: наборы, профили, категории, привязки, уже проверенные |
-| `LogicDescribed{instance, description}` | runtime, после загрузки модуля |
+| `LogicDescribed{instance, description, persisted}` | runtime, после загрузки модуля и чтения сохранённых полей по ключу (D55) |
 | `LogicUpdate{instance, call, update}` | runtime: ответ логики на вызов |
 | `LogicFault{instance, call, reason}` | runtime: trap, превышение времени, нарушение бюджета |
 | `LogicError{instance, call, message}` | runtime: обычный `Err` вызова (D45) |
@@ -41,13 +41,13 @@ impl Core {
 | `Output` | Кому |
 |---|---|
 | `CallLogic{instance, call, invocation}` | runtime: `LogicCall::Init { config, persisted }` или `LogicCall::Handle(LogicEvent)`, с общим `CallId` |
-| `CreateInstance{instance, surface, plugin, set}`, `DisposeInstance{instance}` | runtime. Создание загружает экземпляр и возвращает `LogicDescribed`, но не запускает `init`. У каждой поверхности свои экземпляры |
+| `CreateInstance{instance, surface, plugin, set, persist_key}`, `DisposeInstance{instance}` | runtime. Создание загружает экземпляр и возвращает `LogicDescribed`, но не запускает `init`. У каждой поверхности свои экземпляры |
 | `StartEffect{request, effect, policy}`, `CancelEffect{request}` | исполнитель |
 | `Subscribe{subscription, kind}`, `Unsubscribe{subscription}` | исполнитель |
 | `SendKey{surface, key, phase}`, `WatchKeys{surface, set}`, `Backlight{surface, limit}` | поверхность, если это есть в её `caps` |
 | `DesktopKey{surface, key, phase}` | исполнитель ввода рабочего стола: маршрут клавиш при отсутствии `inject_keys` поверхности и наличии `key` у бэкенда. Если оба маршрута недоступны, запрос получает `unsupported` |
 | `Render{surface, generation, scene}` | рендер: дерево сцены и изменённые экземпляры |
-| `Persist{instance, fields}` | хранилище состояния |
+| `Persist{instance, key, fields}` | хранилище состояния; ключ остаётся действительным после уничтожения экземпляра |
 | `SetTimer{id, at}`, `ClearTimer{id}` | оболочка |
 | `Log{level, event}` | журнал и бортовой журнал |
 
@@ -218,7 +218,7 @@ impl Core {
 }
 ```
 
-- `CoreState` содержит **версию формата**, **`CoreConfig`** (таймауты, пороги, лимиты: с другими значениями те же входы дали бы другие выходы) и всё состояние: каталог целиком (а не хеши), факты, поверхности и сцены, экземпляры с последним `state` логики, очереди вызовов, запросы и подписки, захваты, автоматы привязок и таймеры, счётчики идентификаторов. `CoreSnapshot` для `status` — его урезанное представление.
+- `CoreState` содержит **версию формата**, **`CoreConfig`** (таймауты, пороги, лимиты: с другими значениями те же входы дали бы другие выходы) и всё состояние: каталог целиком (а не хеши), факты, поверхности и сцены, экземпляры с последним `state` логики, очереди вызовов, запросы и подписки, захваты, автоматы привязок и таймеры, счётчики идентификаторов. `CoreSnapshot` для `status` — его урезанное представление: режим, разрешение профиля, слои с владельцами удержаний, панель, экземпляры с состоянием и очередями, запросы, подписки и захваты. Незавершённые committed-запросы остаются видны и после удаления владельца. Контрольная точка также хранит кеш сохраняемых полей и отложенные записи.
 - `restore` берёт конфигурацию из самого `CoreState`. Неизвестная версия формата даёт `RestoreError::Version`: дамп чужой версии не воспроизводится молча с другими правилами.
 - Инвариант детерминизма: `restore(checkpoint(c))` после тех же входов даёт те же выходы, что и `c`. Его проверяет property-тест.
 - Оболочка делает **начальную** контрольную точку сразу после `Core::new`, затем каждые 2000 входов, и хранит две последние вместе со всеми входами после старшей из них. Дамп содержит старшую из хранимых контрольных точек и все входы после неё: до 4000, а пока входов меньше 2000 — начальную точку и все входы с начала сессии ([12-diagnostics.md](12-diagnostics.md)).

@@ -27,6 +27,9 @@ impl<T> Default for TimerRegistry<T> {
     }
 }
 impl<T> TimerRegistry<T> {
+    pub fn deadline(&self, id: TimerId) -> Option<Timestamp> {
+        self.entries.get(&id).map(|job| job.at)
+    }
     pub fn schedule(&mut self, at: Timestamp, task: T) -> TimerId {
         let id = TimerId(self.next_id);
         self.next_id = self.next_id.checked_add(1).expect("timer id exhausted");
