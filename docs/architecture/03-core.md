@@ -37,8 +37,8 @@ impl Core {
 
 | `Output` | Кому |
 |---|---|
-| `CallLogic{instance, call, event}` | runtime |
-| `CreateInstance{instance, surface, plugin, set, config, persisted}`, `DisposeInstance{instance}` | runtime. У каждой поверхности свои экземпляры |
+| `CallLogic{instance, call, invocation}` | runtime: `LogicCall::Init { config, persisted }` или `LogicCall::Handle(LogicEvent)`, с общим `CallId` |
+| `CreateInstance{instance, surface, plugin, set}`, `DisposeInstance{instance}` | runtime. Создание загружает экземпляр и возвращает `LogicDescribed`, но не запускает `init`. У каждой поверхности свои экземпляры |
 | `StartEffect{request, effect, policy}`, `CancelEffect{request}` | исполнитель |
 | `Subscribe{subscription, kind}`, `Unsubscribe{subscription}` | исполнитель |
 | `SendKey{surface, key, phase}`, `WatchKeys{surface, set}`, `Backlight{surface, limit}` | поверхность, если это есть в её `caps`. Иначе `SendKey` уходит в бэкенд рабочего стола |
@@ -86,6 +86,8 @@ impl Core {
 | → `Disposed` | Как `Hidden`, плюс `DisposeInstance`. Действия `committed`, и выполняющиеся, и ожидающие очереди, всё равно доводятся до конца, но их результат отбрасывается |
 
 Экземпляр под слоем (например, когда по Fn показаны F-клавиши) остаётся `Visible`: он не получает касаний и не рисуется, но подписки работают. Логика об этом не узнаёт, а при снятии слоя картинка появляется мгновенно.
+
+После `LogicDescribed` ядро проверяет описание и выдаёт `CallLogic(Init { config, persisted })`. Ответ приходит как обычный `LogicUpdate { instance, call, update }`: только успешный ответ на текущий `Init` переводит экземпляр из `Loading` в `Hidden`, после чего возможен показ. `Init` занимает тот же единственный слот вызова, что и `Handle`; обычные события в `Loading` не отправляются. `LogicCall` — тип хоста, а не дополнительный вариант события WIT (D41).
 
 ### Касание
 

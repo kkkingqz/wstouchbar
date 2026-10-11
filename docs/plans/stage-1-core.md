@@ -72,7 +72,7 @@ T12 можно начать сразу после T4 и наращивать п�
   - `SetSpec` — в объёме ядра: дерево виджетов с id, видами (`button`, `slider`, `scrubber`, `key`, прочие как неинтерактивные), `hold_ms`, обработчиками (`on_*` → имя действия), панелями (`expanded_panel`, `press_and_hold_panel`, `dismiss_on_selection`), привязкой логики (`logic_config`), полями `persist`.
   - `ProfileSpec` — `for`, `when`, `priority`, `default`, `locked`, слоты с кандидатами.
   - Валидация (ссылки, уникальность, конфликты профилей из [08-profiles.md](../architecture/08-profiles.md)) — функция `Catalog::validate` здесь же, чтобы и парсеры, и тесты строили каталог одинаково.
-- **Логика:** `LogicEvent`, `LogicUpdate { state, requests, cancel, subscriptions, presentation }`, `StatePatch`, `Origin`, `CancelReason`. Типы один к одному отражают черновик WIT из [05-logic.md](../architecture/05-logic.md).
+- **Логика:** `LogicEvent`, `LogicUpdate { state, requests, cancel, subscriptions, presentation }`, `StatePatch`, `Origin`, `CancelReason`. Типы один к одному отражают черновик WIT из [05-logic.md](../architecture/05-logic.md). Вызов хоста — `LogicCall::Init { config, persisted }` или `LogicCall::Handle(LogicEvent)`, с общим `CallId` (D41). `Timestamp` — монотонные миллисекунды, определён здесь для всего API.
 - **Действия и подписки:** перечисления видов каталога v1 ([06-effects.md](../architecture/06-effects.md)) с параметрами, `Lifetime`, `EffectDefaults` (lifetime и timeout по виду), `EffectResult`, `EffectError`.
 - **Клавиши:** `SystemKey`, `WatchKey`, `KeyPhase`.
 - Все типы `Serialize`/`Deserialize`: на этом построен бортовой журнал.
@@ -109,7 +109,7 @@ T12 можно начать сразу после T4 и наращивать п�
 ### T6. Ядро: экземпляры
 
 - **Автомат:** `Loading → Hidden ⇄ Visible`, `Faulted` (backoff), `Disposed`.
-- **`CreateInstance` и `DisposeInstance`**, `LogicDescribed`. Сверка описания логики с набором: неизвестное действие или поле — ошибка экземпляра (`Faulted` без повторов до перезагрузки каталога).
+- **`CreateInstance` и `DisposeInstance`**, `LogicDescribed`. Сверка описания логики с набором: неизвестное действие или поле — ошибка экземпляра (`Faulted` без повторов до перезагрузки каталога). После проверки ядро выдаёт `CallLogic(Init)`; только успешный ответ переводит `Loading` в `Hidden`.
 - **Очередь вызовов:** события одного экземпляра строго последовательны. Следующий `CallLogic` выдаётся только после `LogicUpdate` или `LogicFault` на предыдущий. Ядро копит очередь событий и схлопывает `value-changed`.
 - **Применение `LogicUpdate`:** состояние; запросы, отмены и подписки (T10); панель (T8). Недопустимые части отбрасываются с `Log{warn}`.
 - **Видимость** определяется сценой: экземпляр в профиле, слое или открытой панели. Под слоем экземпляр остаётся `Visible`.

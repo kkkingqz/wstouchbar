@@ -48,7 +48,7 @@ interface types {
     }
 
     enum origin { physical, synthetic }
-    enum cancel-reason { hidden, layer, presentation, profile, mode, revoked, fault, hardware }
+    enum cancel-reason { hidden, layer, presentation, profile, layout, mode, revoked, fault, hardware, surface-removed }
     record action-event {
         action: string,
         kind: action-kind,
@@ -129,7 +129,7 @@ world logic {
 ## Правила вызова
 
 - **`describe`** вызывается один раз на модуль. Ядро проверяет, что все действия и поля состояния, на которые ссылаются наборы, объявлены и подходят по типам.
-- **`init`** получает `logic_config` экземпляра и сохранённые поля (`persist = true`). Затем экземпляр переходит в `Hidden`.
+- **`init`** получает `logic_config` экземпляра и сохранённые поля (`persist = true`). Ядро вызывает его после проверки `LogicDescribed`, через `LogicCall::Init` с обычным `CallId`. Только успешный ответ переводит экземпляр в `Hidden`. `LogicCall::Handle` вызывает `handle`; оба вида вызова занимают один общий слот. Это тип хоста, варианты `event` в WIT не меняются (D41).
 - **`handle`** вызывается на каждое событие. События одного экземпляра идут строго последовательно.
 - **`Err(string)`** — ошибка логики. Обновление отбрасывается, ошибка пишется в журнал, а экземпляр продолжает работать.
 - **Недопустимое содержимое** обновления отбрасывается по частям с записью в журнал, весь вызов не отвергается:
