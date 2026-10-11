@@ -5,6 +5,7 @@ mod config;
 mod gestures;
 mod instances;
 mod keys;
+mod layers;
 mod presentations;
 mod profiles;
 use presentations::Presentation;
@@ -25,6 +26,9 @@ use touches::Capture;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SurfaceState {
+    layers: Vec<layers::Layer>,
+    watched: Vec<WatchKey>,
+    render_layers: Vec<InstanceId>,
     info: SurfaceInfo,
     mode: Mode,
     generation: Generation,
@@ -49,6 +53,9 @@ struct SurfaceState {
 // Timer purposes are added by the dependent state machines starting in T5.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum CoreTimer {
+    Binding {
+        source: KeySource,
+    },
     Profile {
         surface: SurfaceId,
     },
@@ -68,6 +75,7 @@ enum CoreTimer {
 #[derive(Clone, Debug)]
 pub struct Core {
     config: CoreConfig,
+    bindings: Vec<layers::SourceBindings>,
     now: Timestamp,
     catalog: Catalog,
     facts: Facts,
@@ -89,6 +97,7 @@ impl Core {
         assert!(config.validate().is_ok(), "invalid CoreConfig");
         Self {
             config,
+            bindings: vec![],
             now: Timestamp(0),
             catalog: Catalog::default(),
             facts: Facts::new(),
@@ -165,6 +174,9 @@ impl Core {
                 self.surfaces.insert(
                     id,
                     SurfaceState {
+                        layers: vec![],
+                        watched: vec![],
+                        render_layers: vec![],
                         info,
                         mode,
                         generation: Generation(0),
@@ -201,6 +213,13 @@ impl Core {
                     warn(&mut output, "duplicate surface name");
                     return output;
                 }
+                if self
+                    .surfaces
+                    .get(&info.id)
+                    .is_some_and(|s| s.info.caps.watch_keys && !info.caps.watch_keys)
+                {
+                    self.reset_binding_source(KeySource::Surface(info.id), &mut output);
+                }
                 if self.surfaces.get(&info.id).is_some_and(|s| s.info != info) {
                     self.cancel_surface(info.id, CancelReason::Layout, &mut output);
                     self.close_presentation(info.id, &mut output);
@@ -221,6 +240,7 @@ impl Core {
                     let id = info.id;
                     state.info = info;
                     state.dirty = true;
+                    self.update_binding_facts(&mut output);
                     self.resolve_surface(id, &mut output);
                 }
             }
@@ -240,6 +260,16 @@ impl Core {
                 self.touch(surface, contact, phase, Point { x, y }, &mut output);
             }
             Input::Mode { surface, mode } => {
+                if self
+                    .surfaces
+                    .get(&surface)
+                    .is_some_and(|s| s.info.caps.modes && s.mode != mode)
+                {
+                    self.reset_binding_source(KeySource::Surface(surface), &mut output);
+                    if mode == Mode::Native {
+                        self.clear_target_holds(surface, &mut output);
+                    }
+                }
                 if mode == Mode::Native
                     && self
                         .surfaces
@@ -280,6 +310,14 @@ impl Core {
                     && state.generation == generation
                     && state.render_info.as_ref() == Some(&state.info)
                     && state.render_presentation == state.presentation.as_ref().map(|p| p.scene.id)
+                    && state.render_layers
+                        == state
+                            .scene
+                            .items
+                            .iter()
+                            .filter(|i| matches!(i.plane, ScenePlane::Layer(_)))
+                            .map(|i| i.instance)
+                            .collect::<Vec<_>>()
                 {
                     if presentation.map(|p| p.id) != state.render_presentation {
                         warn(&mut output, "layout has mismatched panel identity");
@@ -333,6 +371,7 @@ impl Core {
                         self.facts.remove(&name);
                     }
                 }
+                self.update_binding_facts(&mut output);
                 self.resolve_surfaces(&mut output);
             }
             Input::Catalog(catalog) => {
@@ -347,7 +386,13 @@ impl Core {
                     );
                 }
                 if !invalid {
+                    let changed = self.catalog.bindings != catalog.bindings;
                     self.catalog = catalog;
+                    if changed {
+                        self.reload_bindings(&mut output);
+                    } else {
+                        self.prune_layers(&mut output);
+                    }
                     self.resolve_surfaces(&mut output);
                     let ids: Vec<_> = self
                         .instances
@@ -369,6 +414,9 @@ impl Core {
             Input::Timer { id } => {
                 for (timer, task) in self.timers.take_due(now, id) {
                     match task {
+                        CoreTimer::Binding { source } => {
+                            self.binding_timer(source, timer, &mut output)
+                        }
                         CoreTimer::Presentation { surface, id } => {
                             if self.surfaces.get(&surface).is_some_and(|s| {
                                 s.presentation.as_ref().is_some_and(|p| p.scene.id == id)
@@ -471,12 +519,18 @@ impl Core {
                     output.extend(current.load_fault(reason, now, &self.config));
                 }
             }
+            Input::Key {
+                source,
+                code,
+                phase,
+            } => self.key_input(source, code, phase, &mut output),
             // These inputs have no recipient until the dependent state machines create one.
-            Input::Key { .. }
-            | Input::EffectDone { .. }
+            Input::EffectDone { .. }
             | Input::SubscriptionData { .. }
             | Input::SubscriptionLost { .. } => {}
         }
+        self.watch_binding_keys(&mut output);
+        self.sync_binding_timers();
         self.synchronize_presentations(&mut output);
         self.synchronize_captures(&mut output);
         self.finish_pending_profiles(&mut output);
@@ -554,6 +608,7 @@ impl Core {
             &self.catalog,
             &surface.info,
             surface.profile.active.as_ref(),
+            &surface.layers,
             &surface.scene,
             &surface.placements,
             &mut self.next_instance,
@@ -606,6 +661,7 @@ impl Core {
         }
     }
     fn remove_surface(&mut self, id: SurfaceId, reason: CancelReason, output: &mut Vec<Output>) {
+        self.reset_binding_source(KeySource::Surface(id), output);
         self.cancel_surface(id, reason, output);
         self.close_presentation(id, output);
         output.extend(self.keys.release_surface(id));
@@ -730,6 +786,13 @@ impl Core {
             .next_generation
             .checked_add(1)
             .expect("render generation exhausted");
+        surface.render_layers = surface
+            .scene
+            .items
+            .iter()
+            .filter(|i| matches!(i.plane, ScenePlane::Layer(_)))
+            .map(|i| i.instance)
+            .collect();
         surface.render_presentation = surface.presentation.as_ref().map(|p| p.scene.id);
         surface.render_info = Some(surface.info.clone());
         surface.dirty = false;

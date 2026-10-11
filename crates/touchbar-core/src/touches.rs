@@ -144,6 +144,13 @@ impl Core {
         else {
             return;
         };
+        let top = s
+            .scene
+            .items
+            .iter()
+            .rev()
+            .find(|i| matches!(i.plane, ScenePlane::Layer(_)))
+            .map(|i| (i.instance, i.plane));
         // Duplicate Down cannot silently replace a live capture.
         if s.captures.contains_key(&contact) {
             return;
@@ -157,6 +164,9 @@ impl Core {
                     h.plane == ScenePlane::Presentation
                 } else {
                     h.plane != ScenePlane::Presentation
+                        && top.is_none_or(|(instance, plane)| {
+                            h.instance == instance && h.plane == plane
+                        })
                 }
             })
             .filter(|(_, h)| h.rect.contains(point))
@@ -170,6 +180,9 @@ impl Core {
                         h.plane == ScenePlane::Presentation
                     } else {
                         h.plane != ScenePlane::Presentation
+                            && top.is_none_or(|(instance, plane)| {
+                                h.instance == instance && h.plane == plane
+                            })
                     }
                 })
                 .filter_map(|(order, h)| {
@@ -746,7 +759,11 @@ impl Core {
                                     h.instance == c.target.instance
                                         && h.widget == c.target.widget
                                         && h.record_key == c.target.record_key
-                                        && h.plane == c.target.plane
+                                        && (h.plane == c.target.plane
+                                            || matches!(
+                                                (h.plane, c.target.plane),
+                                                (ScenePlane::Layer(_), ScenePlane::Layer(_))
+                                            ))
                                 }) =>
                         {
                             Some(CancelReason::Layout)

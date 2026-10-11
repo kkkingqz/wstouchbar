@@ -10,7 +10,7 @@ A rewrite of [kkkingqz/touchbar](https://github.com/kkkingqz/touchbar)
 The rewrite follows [docs/architecture](docs/architecture/README.md) (in Russian).
 Stage 1 builds the pure engine; the daemon, renderer and WebAssembly runtime
 are planned for later stages. The core currently implements profiles, instance
-lifecycles, touch gestures and panels. Panel widgets share their owner's logic
+lifecycles, touch gestures, panels and key bindings with per-surface layer stacks. Panel widgets share their owner's logic
 and state; the renderer supplies explicit slot and panel bounds.
 
 ## Development

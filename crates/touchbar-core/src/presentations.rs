@@ -120,6 +120,9 @@ impl Core {
         lifecycle: PresentationLifecycle,
         output: &mut Vec<Output>,
     ) {
+        if !self.interactive_instance(source.surface, owner) {
+            return;
+        }
         let Some(instance) = self.instances.get(&owner.number).filter(|i| {
             i.id == owner && i.surface == source.surface && i.status == InstanceStatus::Visible
         }) else {
