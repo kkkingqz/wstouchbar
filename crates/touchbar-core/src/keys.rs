@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use touchbar_model::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KeyOwner {
+    Request(RequestId),
     Logic(InstanceId),
     Contact {
         instance: InstanceId,

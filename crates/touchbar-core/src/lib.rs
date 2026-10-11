@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 mod api;
 mod config;
+mod effects;
 mod gestures;
 mod instances;
 mod keys;
@@ -10,6 +11,7 @@ mod presentations;
 mod profiles;
 use presentations::Presentation;
 mod scenes;
+mod subscriptions;
 mod timers;
 mod touches;
 pub use api::*;
@@ -53,6 +55,13 @@ struct SurfaceState {
 // Timer purposes are added by the dependent state machines starting in T5.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum CoreTimer {
+    SubscriptionRetry {
+        owner: InstanceId,
+        tag: String,
+    },
+    EffectTimeout {
+        request: RequestId,
+    },
     Binding {
         source: KeySource,
     },
@@ -83,6 +92,10 @@ pub struct Core {
     next_generation: u64,
     next_instance: u64,
     next_call: u64,
+    next_request: u64,
+    next_subscription: u64,
+    subscriptions: Vec<subscriptions::Subscription>,
+    requests: Vec<effects::Request>,
     next_capture: u64,
     next_presentation: u64,
     instances: BTreeMap<u64, Instance>,
@@ -105,6 +118,10 @@ impl Core {
             next_generation: 1,
             next_instance: 1,
             next_call: 1,
+            next_request: 1,
+            next_subscription: 1,
+            subscriptions: vec![],
+            requests: vec![],
             next_capture: 1,
             next_presentation: 1,
             instances: BTreeMap::new(),
@@ -414,6 +431,12 @@ impl Core {
             Input::Timer { id } => {
                 for (timer, task) in self.timers.take_due(now, id) {
                     match task {
+                        CoreTimer::SubscriptionRetry { owner, tag } => {
+                            self.subscription_timer(owner, &tag, timer)
+                        }
+                        CoreTimer::EffectTimeout { request } => {
+                            self.cancel_request(request, EffectError::Timeout, &mut output)
+                        }
                         CoreTimer::Binding { source } => {
                             self.binding_timer(source, timer, &mut output)
                         }
@@ -476,8 +499,9 @@ impl Core {
                     .filter(|i| i.id == instance)
                     .and_then(|current| current.update(call, update, &self.config, &mut output));
                 if let Some((completed, update)) = accepted {
+                    self.request_update(instance, update.requests, update.cancel, &mut output);
+                    self.subscription_update(instance, update.subscriptions, &mut output);
                     self.presentation_reply(instance, &completed, update.presentation, &mut output);
-                    // Requests/subscriptions connect in T10, before pending-profile completion.
                 }
             }
             Input::LogicError {
@@ -524,10 +548,14 @@ impl Core {
                 code,
                 phase,
             } => self.key_input(source, code, phase, &mut output),
-            // These inputs have no recipient until the dependent state machines create one.
-            Input::EffectDone { .. }
-            | Input::SubscriptionData { .. }
-            | Input::SubscriptionLost { .. } => {}
+            Input::EffectDone { request, result } => self.effect_done(request, result),
+            Input::SubscriptionData { subscription, data } => {
+                self.subscription_data(subscription, data, &mut output)
+            }
+            Input::SubscriptionLost {
+                subscription,
+                error,
+            } => self.subscription_lost(subscription, error),
         }
         self.watch_binding_keys(&mut output);
         self.sync_binding_timers();
@@ -535,6 +563,9 @@ impl Core {
         self.synchronize_captures(&mut output);
         self.finish_pending_profiles(&mut output);
         self.synchronize_instances(&mut output);
+        self.prepare_subscriptions(&mut output);
+        self.synchronize_effects(&mut output);
+        self.start_subscriptions(&mut output);
         self.synchronize_instance_timers();
         for instance in self.instances.values_mut() {
             output.extend(instance.dispatch(&mut self.next_call));
@@ -695,7 +726,7 @@ impl Core {
                 s.mode == Mode::Display && s.scene.items.iter().any(|i| i.instance == instance.id)
             });
             instance.set_visible(visible);
-            if instance.status == InstanceStatus::Faulted {
+            if !visible || instance.status == InstanceStatus::Faulted {
                 output.extend(self.keys.release_owner(KeyOwner::Logic(instance.id)));
             }
         }

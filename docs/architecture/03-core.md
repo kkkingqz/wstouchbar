@@ -186,6 +186,8 @@ Down ──hit-test──▶ Captured(target, widget) ──Move*──▶ ... �
 | `Requested` или `Running` | логика вернула `cancel` с тегом запроса | `CancelEffect` (для `Running` — с прерыванием, насколько его поддерживает исполнитель), `effect-done(cancelled)`. Относится к любому `lifetime` |
 | `Running` | истёк `timeout` | `CancelEffect`, `effect-done(timeout)` |
 
+Запросы committed хранятся независимо от wasm-экземпляра. Ядро принимает requests/cancel/subscriptions до завершения Pending профиля (D46), затем синхронизирует видимость и допускает выполнение по квотам. Таймаут начинается в Running. Синхронные действия key выполняются самим ядром через учёт владельцев; key.down имеет проверку D53. Таймеры ожидания эффектов и backoff подписок входят в общий реестр.
+
 Подписки — это желаемое множество, которое возвращает логика. Ядро вычисляет разницу с текущим множеством и выдаёт `Subscribe` и `Unsubscribe`. Перезапуск после `SubscriptionLost` идёт с backoff 1, 2, 4… 60 с, логика получает `subscription-lost`.
 
 ## Инварианты
