@@ -7,7 +7,7 @@ driven by WebAssembly logic modules.
 A rewrite of [kkkingqz/touchbar](https://github.com/kkkingqz/touchbar)
 (branch `t2-appletbdrm`, a fork of
 [cameroncooper/touchbar](https://github.com/cameroncooper/touchbar)).
-The architecture is being designed; see `docs/` once it lands.
+The architecture is being designed: see [docs/architecture](docs/architecture/README.md) (in Russian).
 
 ## License
 
