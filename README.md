@@ -7,7 +7,23 @@ driven by WebAssembly logic modules.
 A rewrite of [kkkingqz/touchbar](https://github.com/kkkingqz/touchbar)
 (branch `t2-appletbdrm`, a fork of
 [cameroncooper/touchbar](https://github.com/cameroncooper/touchbar)).
-The architecture is being designed: see [docs/architecture](docs/architecture/README.md) (in Russian).
+The rewrite follows [docs/architecture](docs/architecture/README.md) (in Russian).
+Stage 1 builds the pure engine; the daemon, renderer and WebAssembly runtime
+are planned for later stages.
+
+## Development
+
+Install Rust with rustup; the repository pins the toolchain and its components.
+From the repository root:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+CI also runs a scheduled and manually triggered test job with
+`PROPTEST_CASES=100000`. The property tests are added during stage 1.
 
 ## License
 

@@ -1,0 +1,30 @@
+[workspace]
+members = ["crates/touchbar-model", "crates/touchbar-bindings", "crates/touchbar-core", "crates/touchbar-testkit"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kkkingqz/wstouchbar"
+
+[workspace.dependencies]
+touchbar-model = { path = "crates/touchbar-model" }
+touchbar-bindings = { path = "crates/touchbar-bindings" }
+touchbar-core = { path = "crates/touchbar-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+indexmap = { version = "2", features = ["serde"] }
+proptest = "1"
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+disallowed_types = "deny"
+# Selected pedantic checks, rather than requiring every stylistic preference.
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+match_same_arms = "warn"
