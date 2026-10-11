@@ -20,7 +20,7 @@
 ```
 сессия                               touchbard
   Hello{version=2} ───────────────────▶ проверка peer: активная сессия seat0
-                   ◀─────────────────── Welcome{caps, width, height}   или Revoked{reason}
+                   ◀─────────────────── Welcome{caps, width, height, mm}   или Revoked{reason}
                    ◀─────────────────── ModeChanged{display|native}
  (в display)       ◀─────────────────── Swapchain (заголовок + fd)
   WatchKey ×N     ───────────────────▶
@@ -47,7 +47,7 @@
 
 | kind | Поля | Смысл |
 |---|---|---|
-| `Welcome` | `value` = caps, `x`,`y` = ширина, высота | Ответ на `Hello` |
+| `Welcome` | `value` = caps, `x`,`y` = ширина и высота в пикселях, `payload` = ширина\|высота<<32 в сотых долях мм | Ответ на `Hello`. Физический размер нужен для порогов жестов ([16-surfaces.md](16-surfaces.md)) |
 | `Revoked` | `value` = причина: `NotActive`, `SessionInactive`, `Replaced`, `Version`, `Shutdown` | Последнее сообщение перед закрытием соединения |
 | `ModeChanged` | `value` = `display`/`native`, `payload` = причина: владелец, recovery, сон, ошибка | Смена режима. В `native` сессия не рисует |
 | `Touch` | `value` = фаза (down/move/up/cancel), `payload` = `ContactId`, `x`,`y` = координаты в логических пикселях | Касание |

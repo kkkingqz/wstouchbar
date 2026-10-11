@@ -47,6 +47,8 @@ file = "sets/brightness.toml"
 - промежутки: `fixed-space`, `flexible-space`;
 - новые: `key` (клавиша из `SystemKey`) и `key-row` (ряд клавиш одинаковой ширины).
 
+Размеры задаются относительно поверхности ([16-surfaces.md](16-surfaces.md)). Число без единицы — это базовая единица `u`, по умолчанию 1 % короткой стороны поверхности (у Touch Bar — высоты). Автор набора может явно выбрать `"N%w"` или `"N%h"` для отдельного значения или переопределить `u` в разделе `[units]`. Пикселей нет, поэтому одни и те же наборы работают на Touch Bar разной длины и на других поверхностях.
+
 Привязка к состоянию: поля `*_from` (`text_from`, `value_from`, `enabled_from`, `selected_from`, `visible_from`, `symbol_from`, `canvas_from`). Узел с `visible_from = false` **не участвует** в раскладке (A7). Обработчики: `on_pressed`, `on_activate`, `on_long_pressed`, `on_value_changed`, `on_released`, `on_cancelled` — имя действия логики. Панели: `[[panels]]` с элементами, ширинами, `dismiss_on_selection` и `principal_item`, ссылки на них через `expanded_panel` и `press_and_hold_panel`.
 
 Набор F-клавиш плагина `system` целиком декларативный. Esc добавляется одной строкой:
@@ -60,7 +62,7 @@ label = "Function keys"
 [layout]
 kind = "key-row"
 keys = [
-  # { key = "esc", width = 64 },
+  # { key = "esc", width = 150 },
   { key = "f1" }, { key = "f2" }, { key = "f3" }, { key = "f4" },
   { key = "f5" }, { key = "f6" }, { key = "f7" }, { key = "f8" },
   { key = "f9" }, { key = "f10" }, { key = "f11" }, { key = "f12" },
@@ -85,9 +87,12 @@ keys = [
 ```toml
 disabled = ["profile-media"]
 
-[profile-for]
+[profile-for]                      # для всех поверхностей
 "category:browser" = "my-browser-profile/browser"   # при конфликте профилей
 "app:org.mozilla.firefox" = "my-firefox/firefox"
+
+[profile-for."window:main"]        # только для одной поверхности (после v1)
+"category:browser" = "my-window-profiles/browser"
 
 [app."org.gnome.Rhythmbox3"]
 categories = ["media-player"]      # заменяет автоопределение для одного приложения

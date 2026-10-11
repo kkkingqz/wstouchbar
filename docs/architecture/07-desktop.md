@@ -32,7 +32,7 @@ pub enum BackendEvent {
 
 | Факт | Тип | Смысл |
 |---|---|---|
-| `app.id` | текст | id desktop-файла приложения в фокусе (`org.mozilla.firefox`). Если его нет — `wmclass:<class>`. Без фокуса (рабочий стол) факта нет |
+| `app.id` | текст | id desktop-файла приложения в фокусе (`org.mozilla.firefox`). Если его нет — `wmclass:<class>`. Без фокуса (рабочий стол) факта нет. Собственные окна wstouchbar (будущая поверхность `window`) в факт не попадают |
 | `app.fullscreen` | логический | окно в фокусе развёрнуто на весь экран |
 | `session.locked` | логический | экран заблокирован |
 | `appearance.scheme` | текст | `light` или `dark` |
@@ -46,7 +46,7 @@ pub enum BackendEvent {
 
 ## Команды
 
-`shortcut(keys, app)`, `brightness.set(level)`, `workspace.activate(id)`, `app.launch(id)`. Соответствующие действия плагинов описаны в [06-effects.md](06-effects.md).
+`shortcut(keys, app)`, `key(SystemKey, phase)` (для поверхностей без своего ввода клавиш, [16-surfaces.md](16-surfaces.md)), `brightness.set(level)`, `workspace.activate(id)`, `app.launch(id)`. Соответствующие действия плагинов описаны в [06-effects.md](06-effects.md).
 
 ## Возможности
 

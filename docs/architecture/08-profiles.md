@@ -42,7 +42,7 @@ items = ["media/transport"]               # кандидаты по порядк
 
 [[element]]
 kind = "fixed-space"
-width = 12
+width = 20
 
 [[element]]
 kind = "slot"
@@ -51,14 +51,14 @@ items = ["media/timeline"]
 
 [[element]]
 kind = "flexible-space"
-minimum = 16
+minimum = 27
 weight = 1
 
 [[element]]
 kind = "group"
 id = "levels"
 layout = "equal-width"
-spacing = 8
+spacing = 13
 element = [
   { kind = "slot", id = "volume", items = ["controls/volume"] },
   { kind = "slot", id = "brightness", items = ["controls/brightness"] },
@@ -83,6 +83,10 @@ default = true
 ```
 
 `when` — условие над фактами: равенство, `in`, `exists`, `not`, `all`, `any`. Вложенность до 8 уровней.
+
+Размеры в профилях задаются так же, как в наборах: по умолчанию в базовых единицах `u`, которые вычисляются из размера поверхности ([16-surfaces.md](16-surfaces.md)). Профиль может переопределить `u` в `[units]`, и тогда это значение действует и для наборов внутри него, если они не задали своё. Профили v1 `u` не переопределяют.
+
+Профиль выбирается **для каждой поверхности отдельно**. Условия видят общие факты и факты `surface.*` этой поверхности, поэтому для будущей поверхности `window` можно задать свою раскладку: `when = { "surface.kind" = "window" }`.
 
 ## Выбор профиля
 

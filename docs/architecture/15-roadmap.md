@@ -5,9 +5,9 @@
 | Этап | Содержание | Готово, когда |
 |---|---|---|
 | **0. Документ** | эта архитектура, список паритета, открытые вопросы | документ согласован |
-| **1. Ядро** | `touchbar-core`, `touchbar-bindings`, `touchbar-testkit`, property-тесты инвариантов, сценарии из найденных багов | инварианты I1–I11 проходят на 10⁵ случайных последовательностей |
+| **1. Ядро** | `touchbar-core`, `touchbar-bindings`, `touchbar-testkit`, property-тесты инвариантов, сценарии из найденных багов | инварианты I1–I12 проходят на 10⁵ случайных последовательностей |
 | **2. Логика** | `wit/logic.wit`, `touchbar-logic-types`, `-runtime`, `-sdk`, перенос плагина `controls` | `controls` проходит тесты логики в testkit |
-| **3. Сессия** | `touchbar-sets`, перенос `touchbar-ui` и `touchbar-layout`, исполнитель действий, `touchbar-audio`, презентеры `headless` и `window`, `touchbarctl render/status` | `controls` работает в симуляторе, эталонные PNG |
+| **3. Сессия** | `touchbar-sets`, перенос `touchbar-ui` и `touchbar-layout`, исполнитель действий, `touchbar-audio`, поверхность `headless` и симулятор, `touchbarctl render/status` | `controls` работает в симуляторе, эталонные PNG |
 | **4. touchbard** | протокол v2, рефакторинг `touchbard`: режимы, владение по logind, recovery, сон, мост Fn, затемнение | на железе: чек-лист пунктов 1, 3–7 ([13-testing.md](13-testing.md)) |
 | **5. Содержимое** | `touchbar-media`, `touchbar-open`, `touchbar-apps`, API рабочего стола, бэкенд GNOME и расширение, плагины `system`, `media`, `browser`, `profile-*` | весь список паритета v1 на железе |
 | **6. Выпуск** | `touchbarctl` полностью, `xtask install/deb`, PKGBUILD, CI, Releases, переход wsconfig на пакет с удалением `ws-touchbar-fn` | установка `.deb` на чистую систему и на рабочую машину через wsconfig |
@@ -31,4 +31,4 @@
 
 ## После v1
 
-Батарея и профиль питания (`controls`), now-playing (`media`), офис (B/I/U), command-deck, capture, бэкенды Hyprland и Omarchy, workspaces, RPM, репозиторий t2linux, `http`, `file`, `clipboard` и `notify` в каталоге действий, триггеры касанием полосы.
+Поверхность `window` (окно Wayland на сенсорном мониторе, [16-surfaces.md](16-surfaces.md)), батарея и профиль питания (`controls`), now-playing (`media`), офис (B/I/U), command-deck, capture, бэкенды Hyprland и Omarchy, workspaces, RPM, репозиторий t2linux, `http`, `file`, `clipboard` и `notify` в каталоге действий, триггеры касанием полосы.

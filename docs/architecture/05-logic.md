@@ -59,7 +59,8 @@ interface types {
     }
 
     record context {
-        width: u32,
+        surface-kind: string,         // touchbar | window | headless
+        slot-width: f32,              // ширина слота в базовых единицах u
         representation: string,       // текущий вариант responsive
         color-scheme: string,         // light | dark
         accent: option<string>,
@@ -152,7 +153,7 @@ world logic {
 
 ## Сохраняемое состояние
 
-Поля с `persist = true` после каждого обновления сохраняются в `$XDG_STATE_HOME/touchbar/<plugin>/<slot>.json`. Запись идёт с задержкой 1 с, на диск попадают только изменившиеся поля. Сохранённые значения передаются в `init`. Если схема поля изменилась (другой тип), сохранённое значение отбрасывается.
+Поля с `persist = true` после каждого обновления сохраняются в `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/<slot>.json`. Запись идёт с задержкой 1 с, на диск попадают только изменившиеся поля. Сохранённые значения передаются в `init`. Если схема поля изменилась (другой тип), сохранённое значение отбрасывается.
 
 ## SDK
 

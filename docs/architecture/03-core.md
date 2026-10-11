@@ -18,10 +18,11 @@ impl Core {
 
 | `Input` | Откуда |
 |---|---|
-| `Touch{contact, phase, x, y}` | `touchbard` |
-| `Key{code, phase}` | `touchbard` (отслеживаемые клавиши) |
-| `Mode{display\|native}`, `Revoked` | `touchbard` |
-| `Geometry{width, height}` | `touchbard` или презентер |
+| `SurfaceAdded(SurfaceInfo)`, `SurfaceChanged`, `SurfaceRemoved` | `touchbard` или другая поверхность ([16-surfaces.md](16-surfaces.md)) |
+| `Touch{surface, contact, phase, x, y}` | поверхность |
+| `Key{source, code, phase}` | поверхность (отслеживаемые клавиши `touchbard`) или бэкенд рабочего стола |
+| `Mode{surface, display\|native}`, `Revoked{surface}` | `touchbard` |
+| `Layout{surface, generation, hit_map, representations}` | рендер: карта попаданий (прямоугольники виджетов в пикселях) и выбранные варианты `responsive` в ответ на `Render` |
 | `Fact{name, value \| absent}` | бэкенд рабочего стола, `touchbar-apps`, модули media и audio |
 | `Catalog(PluginCatalog)` | загрузчик плагинов: наборы, профили, категории, привязки, уже проверенные |
 | `LogicDescribed{instance, description}` | runtime, после загрузки модуля |
@@ -37,11 +38,11 @@ impl Core {
 | `Output` | Кому |
 |---|---|
 | `CallLogic{instance, call, event}` | runtime |
-| `CreateInstance{instance, plugin, set, config, persisted}`, `DisposeInstance{instance}` | runtime |
+| `CreateInstance{instance, surface, plugin, set, config, persisted}`, `DisposeInstance{instance}` | runtime. У каждой поверхности свои экземпляры |
 | `StartEffect{request, effect, policy}`, `CancelEffect{request}` | исполнитель |
 | `Subscribe{subscription, kind}`, `Unsubscribe{subscription}` | исполнитель |
-| `SendKey{key, phase}`, `WatchKeys{set}`, `Backlight{limit}` | `touchbard` |
-| `Render(Scene)` | рендер: дерево сцены и изменённые экземпляры |
+| `SendKey{surface, key, phase}`, `WatchKeys{surface, set}`, `Backlight{surface, limit}` | поверхность, если это есть в её `caps`. Иначе `SendKey` уходит в бэкенд рабочего стола |
+| `Render{surface, generation, scene}` | рендер: дерево сцены и изменённые экземпляры |
 | `Persist{instance, fields}` | хранилище состояния |
 | `SetTimer{id, at}`, `ClearTimer{id}` | оболочка |
 | `Log{level, event}` | журнал и бортовой журнал |
@@ -50,9 +51,9 @@ impl Core {
 
 - **Каталог:** проверенные плагины, наборы, профили, категории, привязки. Заменяется целиком при перезагрузке.
 - **Факты:** `BTreeMap<FactName, FactValue>`.
-- **Сцена:** активный профиль, стек слоёв, открытая панель и размещённые в них экземпляры.
+- **Поверхности:** описание каждой поверхности и её сцена. У каждой поверхности свои профиль, стек слоёв, панель и размещённые в них экземпляры, а также последняя карта попаданий. Выбор профиля для поверхности видит общие факты и факты `surface.*` этой поверхности. В v1 реально подключается только Touch Bar, но ядро с самого начала поддерживает несколько поверхностей одновременно ([16-surfaces.md](16-surfaces.md)).
 - **Экземпляры:** состояние логики (последний `state`), видимость, запросы и подписки в работе.
-- **Касания:** таблица захватов `ContactId → Capture`.
+- **Касания:** таблица захватов `(SurfaceId, ContactId) → Capture`.
 - **Привязки:** автомат на каждую привязку сессии (см. [09-bindings.md](09-bindings.md)).
 
 ## Автоматы
@@ -93,8 +94,9 @@ Down ──hit-test──▶ Captured(target, widget) ──Move*──▶ ... �
                                                          └──▶ Cancel(reason)
 ```
 
-- **Цель.** Для `Down` цель определяется проверкой попадания по текущей сцене: панель, затем слой, затем профиль. Если касание не попало ни в один виджет, срабатывает запасной вариант из исходного проекта: ближайший виджет в той же колонке.
-- **Причины отмены:** `Hidden`, `Layer`, `Presentation`, `Profile`, `Mode`, `Revoked`, `Fault`, `Hardware` (cancel от `touchbard`).
+- **Цель.** Для `Down` цель определяется по последней карте попаданий поверхности (`Layout`): панель, затем слой, затем профиль. Если касание не попало ни в один виджет, срабатывает запасной вариант из исходного проекта: ближайший виджет в той же колонке, не дальше порога по вертикали. Пороги жестов заданы в миллиметрах и переводятся в пиксели через `px_per_mm` поверхности ([16-surfaces.md](16-surfaces.md)).
+- **Устаревшая карта.** Пока рендер не ответил на новый `Render`, используется предыдущая карта. Если касание попало в экземпляр, которого в новой сцене нет, оно отменяется с причиной `Layout`.
+- **Причины отмены:** `Hidden`, `Layer`, `Presentation`, `Profile`, `Layout`, `Mode`, `Revoked`, `Fault`, `Hardware` (cancel от поверхности), `SurfaceRemoved`.
 - **Завершение.** `Up` и `Cancel` доставляются по таблице захватов, а не по текущей сцене.
 
 ### Виджет
@@ -165,7 +167,8 @@ Down ──hit-test──▶ Captured(target, widget) ──Move*──▶ ... �
 8. **I8.** Логика не получает событий в `Loading`, `Faulted` и `Disposed`.
 9. **I9.** Каждая отправленная клавиша `pressed` получает `released`, даже при отмене касания, скрытии, смене режима или отзыве.
 10. **I10.** Сбой одного экземпляра не меняет состояние других, если не считать перераскладки.
-11. **I11.** В режиме `native` ядро не выдаёт `Render` и `SendKey`.
+11. **I11.** Для поверхности в режиме `native` ядро не выдаёт `Render` и `SendKey`. Ядро не выдаёт команд, которых нет в `caps` поверхности.
+12. **I12.** Поверхности независимы: события одной поверхности не меняют касаний, панелей и слоёв другой, если не считать общих фактов.
 
 ## Бортовой журнал
 
