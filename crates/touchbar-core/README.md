@@ -15,5 +15,16 @@ Changes to a shared logic provider recreate its consumers. Static sets do not
 create a wasm runtime instance.
 
 The profile switch and timer integration are tested independently. Touch capture
-membership and deadline cancellation connect in T7. Instance lifecycle, panels,
-bindings and effects are added in T6–T10; their inputs acquire recipients there.
+membership and deadline cancellation connect in T7.
+
+T6 adds instance lifecycle, description validation (including record bindings),
+correlated Init/Handle calls, an ordered call queue, state patch validation, and
+fault isolation with retry generations and capped exponential backoff. Adjacent
+pending ValueChanged events for the same action/record coalesce; a running call
+and activation barriers retain their order. Ordinary Handle errors advance the
+queue; Init/load errors retry, schema errors wait for a catalog reload.
+
+Touch events, presentations and effects connect in T7/T8/T10. T11 wires persisted
+fields into Init and adds full CoreState restore. Until then Init receives an
+empty persisted patch. Wasm execution and its time/memory budgets belong to the
+runtime stage; this crate validates state types, finite geometry and field limits.

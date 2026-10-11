@@ -257,6 +257,19 @@ impl Catalog {
                 &mut issues,
             );
             let widgets = set.all_widgets();
+            if set.logic.is_none()
+                && (!set.persist.is_empty()
+                    || widgets
+                        .iter()
+                        .any(|w| !w.handlers.is_empty() || !w.state_bindings.is_empty()))
+            {
+                issue(
+                    &mut issues,
+                    CatalogIssueCode::InvalidWidget,
+                    &location,
+                    "logic handlers, state bindings and persist require a logic provider",
+                );
+            }
             duplicates(
                 widgets.iter().map(|w| &w.id),
                 CatalogIssueCode::DuplicateWidget,

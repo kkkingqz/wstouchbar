@@ -37,6 +37,29 @@ fn rejects(c: &Catalog, code: CatalogIssueCode) {
         c.validate()
     );
 }
+#[test]
+fn logic_bindings_and_persist_require_a_logic_provider() {
+    for part in 0..3 {
+        let mut c = catalog();
+        c.sets[0].logic = None;
+        if part == 2 {
+            c.sets[0].persist.push("value".into());
+        } else {
+            let mut widget = WidgetSpec::new("button".parse().unwrap(), WidgetKind::Button);
+            if part == 0 {
+                widget
+                    .handlers
+                    .insert(ActionKind::Activated, "activate".into());
+            } else {
+                widget
+                    .state_bindings
+                    .insert(StateBinding::Text, "caption".into());
+            }
+            c.sets[0].widgets.push(widget);
+        }
+        rejects(&c, CatalogIssueCode::InvalidWidget);
+    }
+}
 
 #[test]
 fn valid_catalog_round_trips_with_ordered_candidates() {

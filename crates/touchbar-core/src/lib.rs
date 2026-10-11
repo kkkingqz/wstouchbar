@@ -2,12 +2,14 @@
 #![forbid(unsafe_code)]
 mod api;
 mod config;
+mod instances;
 mod keys;
 mod profiles;
 mod scenes;
 mod timers;
 pub use api::*;
 pub use config::*;
+use instances::Instance;
 pub use keys::*;
 pub use profiles::*;
 use scenes::{Placement, PlacementChange, compose};
@@ -36,6 +38,7 @@ struct SurfaceState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum CoreTimer {
     Profile { surface: SurfaceId },
+    InstanceRetry { instance: InstanceId },
 }
 #[derive(Clone, Debug)]
 pub struct Core {
@@ -46,6 +49,9 @@ pub struct Core {
     surfaces: BTreeMap<SurfaceId, SurfaceState>,
     next_generation: u64,
     next_instance: u64,
+    next_call: u64,
+    instances: BTreeMap<u64, Instance>,
+    instance_timers: BTreeMap<u64, (InstanceId, TimerId, Timestamp)>,
     timers: TimerRegistry<CoreTimer>,
     keys: KeyTracker,
     desktop: DesktopCapabilities,
@@ -62,6 +68,9 @@ impl Core {
             surfaces: BTreeMap::new(),
             next_generation: 1,
             next_instance: 1,
+            next_call: 1,
+            instances: BTreeMap::new(),
+            instance_timers: BTreeMap::new(),
             timers: TimerRegistry::default(),
             keys: KeyTracker::default(),
             desktop: DesktopCapabilities::default(),
@@ -69,6 +78,7 @@ impl Core {
     }
     pub fn snapshot(&self) -> CoreSnapshot {
         CoreSnapshot {
+            instances: self.instances.values().map(Instance::snapshot).collect(),
             now: self.now,
             facts: self.facts.clone(),
             plugins: self.catalog.plugins.iter().map(|p| p.id.clone()).collect(),
@@ -168,7 +178,6 @@ impl Core {
                             id,
                             PlacementChange::Remove {
                                 instance: item.instance,
-                                set: item.set,
                             },
                             &mut output,
                         );
@@ -191,7 +200,6 @@ impl Core {
                         }
                         state.mode = mode;
                         state.dirty = true;
-                        self.render(surface, &mut output);
                     }
                 }
             }
@@ -229,7 +237,6 @@ impl Core {
                     && state.generation == generation
                 {
                     state.frame_pending = false;
-                    self.render(surface, &mut output);
                 }
             }
             Input::Fact { name, value } => {
@@ -264,6 +271,15 @@ impl Core {
                 if !invalid {
                     self.catalog = catalog;
                     self.resolve_surfaces(&mut output);
+                    let ids: Vec<_> = self
+                        .instances
+                        .values()
+                        .filter(|i| i.schema_fault)
+                        .map(|i| i.id)
+                        .collect();
+                    for id in ids {
+                        self.restart_instance(id, &mut output);
+                    }
                 }
             }
             Input::DesktopCapabilities(capabilities) => {
@@ -284,18 +300,92 @@ impl Core {
                                 }
                             }
                         }
+                        CoreTimer::InstanceRetry { instance } => {
+                            if self.instances.get(&instance.number).is_some_and(|i| {
+                                i.id == instance && i.retry_at.is_some_and(|at| at <= now)
+                            }) {
+                                self.restart_instance(instance, &mut output);
+                            }
+                        }
                     }
+                }
+            }
+            Input::LogicDescribed {
+                instance,
+                description,
+            } => {
+                if let Some(current) = self
+                    .instances
+                    .get_mut(&instance.number)
+                    .filter(|i| i.id == instance)
+                {
+                    output.extend(current.describe(description, vec![], now, &self.config));
+                }
+            }
+            Input::LogicUpdate {
+                instance,
+                call,
+                update,
+            } => {
+                if let Some(current) = self
+                    .instances
+                    .get_mut(&instance.number)
+                    .filter(|i| i.id == instance)
+                {
+                    // Accepted non-state parts are connected to presentations/effects in T8/T10.
+                    let _ = current.update(call, update, &self.config, &mut output);
+                }
+            }
+            Input::LogicError {
+                instance,
+                call,
+                message,
+            } => {
+                if let Some(current) = self
+                    .instances
+                    .get_mut(&instance.number)
+                    .filter(|i| i.id == instance)
+                {
+                    output.extend(current.error(call, message, now, &self.config));
+                }
+            }
+            Input::LogicFault {
+                instance,
+                call,
+                reason,
+            } => {
+                if let Some(current) = self
+                    .instances
+                    .get_mut(&instance.number)
+                    .filter(|i| i.id == instance)
+                {
+                    output.extend(current.call_fault(call, reason, now, &self.config));
+                }
+            }
+            Input::InstanceFault { instance, reason } => {
+                if let Some(current) = self
+                    .instances
+                    .get_mut(&instance.number)
+                    .filter(|i| i.id == instance)
+                {
+                    output.extend(current.load_fault(reason, now, &self.config));
                 }
             }
             // These inputs have no recipient until the dependent state machines create one.
             Input::Touch { .. }
             | Input::Key { .. }
-            | Input::LogicDescribed { .. }
-            | Input::LogicUpdate { .. }
-            | Input::LogicFault { .. }
             | Input::EffectDone { .. }
             | Input::SubscriptionData { .. }
             | Input::SubscriptionLost { .. } => {}
+        }
+        self.synchronize_instances(&mut output);
+        self.synchronize_instance_timers();
+        for instance in self.instances.values_mut() {
+            output.extend(instance.dispatch(&mut self.next_call));
+        }
+        let surfaces: Vec<_> = self.surfaces.keys().copied().collect();
+        for surface in surfaces {
+            self.render(surface, &mut output);
         }
         output.extend(self.timers.notify().into_iter().map(Output::from));
         output
@@ -367,7 +457,6 @@ impl Core {
         for change in composition.changes {
             self.placement_change(id, change, output);
         }
-        self.render(id, output);
     }
     fn placement_change(
         &mut self,
@@ -377,21 +466,107 @@ impl Core {
     ) {
         match change {
             PlacementChange::Create { instance, set } => {
-                if let Some(plugin) = set.logic {
-                    output.push(Output::CreateInstance {
-                        instance,
-                        surface,
-                        plugin,
-                        set: set.reference,
-                    });
-                }
+                let state = self.surfaces.get(&surface).expect("placement surface");
+                let slot = state
+                    .scene
+                    .items
+                    .iter()
+                    .find(|i| i.instance == instance)
+                    .expect("new placement")
+                    .slot
+                    .clone();
+                let logic =
+                    Instance::new(instance, surface, slot, set, state.mode == Mode::Display);
+                output.extend(logic.creation());
+                self.instances.insert(instance.number, logic);
             }
-            PlacementChange::Remove { instance, set } => {
+            PlacementChange::Remove { instance } => {
                 output.extend(self.keys.release_owner(KeyOwner::Logic(instance)));
-                if set.logic.is_some() {
-                    output.push(Output::DisposeInstance { instance });
+                if let Some(mut logic) = self.instances.remove(&instance.number) {
+                    output.extend(logic.dispose(&mut self.next_call));
                 }
             }
+        }
+    }
+    fn synchronize_instances(&mut self, output: &mut Vec<Output>) {
+        for instance in self.instances.values_mut() {
+            let visible = self.surfaces.get(&instance.surface).is_some_and(|s| {
+                s.mode == Mode::Display && s.scene.items.iter().any(|i| i.instance == instance.id)
+            });
+            instance.set_visible(visible);
+            if instance.status == InstanceStatus::Faulted {
+                output.extend(self.keys.release_owner(KeyOwner::Logic(instance.id)));
+            }
+        }
+        for surface in self.surfaces.values_mut() {
+            for item in &mut surface.scene.items {
+                if let Some(instance) = self
+                    .instances
+                    .get_mut(&item.instance.number)
+                    .filter(|i| i.id == item.instance)
+                {
+                    instance.set = item.set.clone();
+                    if item.status != instance.status || item.state != instance.state {
+                        item.status = instance.status;
+                        item.state = instance.state.clone();
+                        surface.dirty = true;
+                    }
+                }
+            }
+        }
+    }
+    fn synchronize_instance_timers(&mut self) {
+        let obsolete: Vec<_> = self
+            .instance_timers
+            .iter()
+            .filter(|(number, (instance, _, at))| {
+                !self
+                    .instances
+                    .get(number)
+                    .is_some_and(|i| i.id == *instance && i.retry_at == Some(*at))
+            })
+            .map(|(number, _)| *number)
+            .collect();
+        for number in obsolete {
+            if let Some((_, timer, _)) = self.instance_timers.remove(&number) {
+                self.timers.cancel(timer);
+            }
+        }
+        for instance in self.instances.values() {
+            if let Some(at) = instance.retry_at
+                && !self.instance_timers.contains_key(&instance.id.number)
+            {
+                let timer = self.timers.schedule(
+                    at,
+                    CoreTimer::InstanceRetry {
+                        instance: instance.id,
+                    },
+                );
+                self.instance_timers
+                    .insert(instance.id.number, (instance.id, timer, at));
+            }
+        }
+    }
+    fn restart_instance(&mut self, id: InstanceId, output: &mut Vec<Output>) {
+        let Some(instance) = self.instances.get_mut(&id.number).filter(|i| i.id == id) else {
+            return;
+        };
+        if let Some(create) = instance.restart() {
+            let new = instance.id;
+            if let Some(surface) = self.surfaces.get_mut(&instance.surface) {
+                for placement in &mut surface.placements {
+                    if placement.instance == id {
+                        placement.instance = new;
+                    }
+                }
+                for item in &mut surface.scene.items {
+                    if item.instance == id {
+                        item.instance = new;
+                    }
+                }
+                surface.dirty = true;
+            }
+            output.push(create);
         }
     }
     fn render(&mut self, id: SurfaceId, output: &mut Vec<Output>) {

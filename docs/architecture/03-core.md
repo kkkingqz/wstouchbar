@@ -29,6 +29,8 @@ impl Core {
 | `LogicDescribed{instance, description}` | runtime, после загрузки модуля |
 | `LogicUpdate{instance, call, update}` | runtime: ответ логики на вызов |
 | `LogicFault{instance, call, reason}` | runtime: trap, превышение времени, нарушение бюджета |
+| `LogicError{instance, call, message}` | runtime: обычный `Err` вызова (D45) |
+| `InstanceFault{instance, reason}` | runtime: ошибка загрузки или `describe` до появления `CallId` (D45) |
 | `EffectDone{request, result}` | исполнитель действий |
 | `SubscriptionData{subscription, data}`, `SubscriptionLost{subscription, error}` | исполнитель подписок |
 | `Timer{id}` | оболочка, по `Output::SetTimer` |
@@ -92,6 +94,10 @@ impl Core {
 Экземпляр под слоем (например, когда по Fn показаны F-клавиши) остаётся `Visible`: он не получает касаний и не рисуется, но подписки работают. Логика об этом не узнаёт, а при снятии слоя картинка появляется мгновенно.
 
 После `LogicDescribed` ядро проверяет описание и выдаёт `CallLogic(Init { config, persisted })`. Ответ приходит как обычный `LogicUpdate { instance, call, update }`: только успешный ответ на текущий `Init` переводит экземпляр из `Loading` в `Hidden`, после чего возможен показ. `Init` занимает тот же единственный слот вызова, что и `Handle`; обычные события в `Loading` не отправляются. `LogicCall` — тип хоста, а не дополнительный вариант события WIT (D41).
+
+`LogicError` завершает текущий вызов. Для `Handle` состояние сохраняется и очередь продолжается; для `Init` экземпляр переходит в `Faulted` с backoff (D45). `InstanceFault` применяется только к загрузке до успешного `LogicDescribed`. Ошибка схемы набора не повторяется по таймеру: повтор разрешает новая успешная загрузка каталога. Повтор после сбоя увеличивает поколение экземпляра; ответы и таймеры прежнего поколения игнорируются. Успешный обычный `Handle` сбрасывает backoff.
+
+`SceneItem.status` позволяет рендеру отличить загрузку, готовый экземпляр и заглушку после сбоя. Состояние и очередь каждого экземпляра отражаются в `CoreSnapshot`; уничтоженные экземпляры из него удаляются.
 
 ### Касание
 

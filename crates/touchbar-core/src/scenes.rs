@@ -1,4 +1,4 @@
-use crate::{Scene, SceneItem};
+use crate::{InstanceStatus, Scene, SceneItem};
 use serde::{Deserialize, Serialize};
 use touchbar_model::*;
 
@@ -18,7 +18,7 @@ pub(crate) struct Placement {
 }
 pub(crate) enum PlacementChange {
     Create { instance: InstanceId, set: SetSpec },
-    Remove { instance: InstanceId, set: SetSpec },
+    Remove { instance: InstanceId },
 }
 pub(crate) struct Composition {
     pub scene: Scene,
@@ -98,6 +98,18 @@ pub(crate) fn compose(
                 state,
                 plane: ScenePlane::Profile,
                 units: UnitSize::resolve(surface, set.units, profile.units),
+                status: previous
+                    .items
+                    .iter()
+                    .find(|i| i.instance == instance)
+                    .map_or(
+                        if set.logic.is_some() {
+                            InstanceStatus::Loading
+                        } else {
+                            InstanceStatus::Visible
+                        },
+                        |i| i.status,
+                    ),
             });
             retained.push(Placement { instance, identity });
         }
@@ -108,7 +120,6 @@ pub(crate) fn compose(
         .filter(|i| !retained.iter().any(|p| p.instance == i.instance))
         .map(|i| PlacementChange::Remove {
             instance: i.instance,
-            set: i.set.clone(),
         })
         .collect();
     changes.extend(creates);

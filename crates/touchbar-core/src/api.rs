@@ -7,6 +7,26 @@ pub enum Mode {
     Display,
     Native,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InstanceStatus {
+    Loading,
+    Hidden,
+    Visible,
+    Faulted,
+    Disposed,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InstanceSnapshot {
+    pub id: InstanceId,
+    pub surface: SurfaceId,
+    pub set: SetRef,
+    pub status: InstanceStatus,
+    pub state: StatePatch,
+    pub in_flight: Option<CallId>,
+    pub queue_len: usize,
+    pub retry_at: Option<Timestamp>,
+    pub fault: Option<String>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum KeySource {
     Surface(SurfaceId),
@@ -31,6 +51,7 @@ pub struct SceneItem {
     pub state: StatePatch,
     pub plane: ScenePlane,
     pub units: UnitSize,
+    pub status: InstanceStatus,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -86,6 +107,15 @@ pub enum Input {
     LogicFault {
         instance: InstanceId,
         call: CallId,
+        reason: String,
+    },
+    LogicError {
+        instance: InstanceId,
+        call: CallId,
+        message: String,
+    },
+    InstanceFault {
+        instance: InstanceId,
         reason: String,
     },
     EffectDone {
@@ -194,4 +224,5 @@ pub struct CoreSnapshot {
     pub surfaces: Vec<SurfaceSnapshot>,
     pub plugins: Vec<PluginId>,
     pub now: Timestamp,
+    pub instances: Vec<InstanceSnapshot>,
 }
