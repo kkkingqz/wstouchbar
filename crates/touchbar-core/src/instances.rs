@@ -7,6 +7,7 @@ use touchbar_model::*;
 struct InFlight {
     call: CallId,
     invocation: LogicCall,
+    discard_update: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Instance {
@@ -16,6 +17,7 @@ pub(crate) struct Instance {
     pub set: SetSpec,
     pub status: InstanceStatus,
     pub state: StatePatch,
+    pub interactions: Vec<crate::WidgetInteraction>,
     pub retry_at: Option<Timestamp>,
     pub schema_fault: bool,
     wanted_visible: bool,
@@ -48,6 +50,7 @@ impl Instance {
             runtime_alive: set.logic.is_some(),
             set,
             state: vec![],
+            interactions: vec![],
             retry_at: None,
             schema_fault: false,
             wanted_visible: visible,
@@ -138,6 +141,40 @@ impl Instance {
         }
         self.queue.push_back(LogicCall::Handle(event));
     }
+    pub fn has_physical_work(&self) -> bool {
+        let physical = |call: &LogicCall| {
+            matches!(
+                call,
+                LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                    origin: Origin::Physical,
+                    ..
+                }))
+            )
+        };
+        self.in_flight
+            .as_ref()
+            .is_some_and(|c| !c.discard_update && physical(&c.invocation))
+            || self.queue.iter().any(physical)
+    }
+    pub fn discard_physical_work(&mut self) {
+        let physical = |call: &LogicCall| {
+            matches!(
+                call,
+                LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                    origin: Origin::Physical,
+                    ..
+                }))
+            )
+        };
+        self.queue.retain(|call| !physical(call));
+        if let Some(flight) = &mut self.in_flight
+            && physical(&flight.invocation)
+        {
+            // Keep the slot occupied until completion; a preserved instance must
+            // never execute a second wasm call concurrently with the abandoned one.
+            flight.discard_update = true;
+        }
+    }
     pub fn dispatch(&mut self, next_call: &mut u64) -> Option<Output> {
         if self.in_flight.is_some() || !self.runtime_alive {
             return None;
@@ -157,6 +194,7 @@ impl Instance {
         self.in_flight = Some(InFlight {
             call,
             invocation: invocation.clone(),
+            discard_update: false,
         });
         Some(Output::CallLogic {
             instance: self.id,
@@ -174,7 +212,11 @@ impl Instance {
         if !self.matches_call(call) {
             return None;
         }
-        let invocation = self.in_flight.take().expect("matched call").invocation;
+        let flight = self.in_flight.take().expect("matched call");
+        if flight.discard_update {
+            return None;
+        }
+        let invocation = flight.invocation;
         let description = self.description.as_ref().expect("described before calls");
         update.state.retain(|(name, value)| {
             let valid = description

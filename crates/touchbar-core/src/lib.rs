@@ -2,11 +2,13 @@
 #![forbid(unsafe_code)]
 mod api;
 mod config;
+mod gestures;
 mod instances;
 mod keys;
 mod profiles;
 mod scenes;
 mod timers;
+mod touches;
 pub use api::*;
 pub use config::*;
 use instances::Instance;
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use timers::*;
 use touchbar_model::*;
+use touches::Capture;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SurfaceState {
@@ -25,6 +28,7 @@ struct SurfaceState {
     generation: Generation,
     scene: Scene,
     layout_generation: Option<Generation>,
+    render_info: Option<SurfaceInfo>,
     hit_map: HitMap,
     representations: Representations,
     frame_pending: bool,
@@ -33,12 +37,23 @@ struct SurfaceState {
     profile: ProfileSwitch,
     profile_timer: Option<(TimerId, Timestamp)>,
     placements: Vec<Placement>,
+    captures: BTreeMap<ContactId, Capture>,
+    scrubbers: Vec<ScrubberLayout>,
 }
 // Timer purposes are added by the dependent state machines starting in T5.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum CoreTimer {
-    Profile { surface: SurfaceId },
-    InstanceRetry { instance: InstanceId },
+    Profile {
+        surface: SurfaceId,
+    },
+    Hold {
+        surface: SurfaceId,
+        contact: ContactId,
+        instance: InstanceId,
+    },
+    InstanceRetry {
+        instance: InstanceId,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Core {
@@ -78,6 +93,17 @@ impl Core {
     }
     pub fn snapshot(&self) -> CoreSnapshot {
         CoreSnapshot {
+            captures: self
+                .surfaces
+                .iter()
+                .flat_map(|(surface, s)| {
+                    s.captures.iter().map(move |(contact, c)| CaptureSnapshot {
+                        surface: *surface,
+                        contact: *contact,
+                        target: c.target.clone(),
+                    })
+                })
+                .collect(),
             instances: self.instances.values().map(Instance::snapshot).collect(),
             now: self.now,
             facts: self.facts.clone(),
@@ -130,6 +156,7 @@ impl Core {
                         generation: Generation(0),
                         scene: Scene::default(),
                         layout_generation: None,
+                        render_info: None,
                         hit_map: vec![],
                         representations: vec![],
                         frame_pending: false,
@@ -138,6 +165,8 @@ impl Core {
                         profile: ProfileSwitch::default(),
                         profile_timer: None,
                         placements: vec![],
+                        captures: BTreeMap::new(),
+                        scrubbers: vec![],
                     },
                 );
                 self.resolve_surface(id, &mut output);
@@ -154,6 +183,14 @@ impl Core {
                     warn(&mut output, "duplicate surface name");
                     return output;
                 }
+                if self.surfaces.get(&info.id).is_some_and(|s| s.info != info) {
+                    self.cancel_surface(info.id, CancelReason::Layout, &mut output);
+                    if let Some(s) = self.surfaces.get_mut(&info.id) {
+                        s.hit_map.clear();
+                        s.scrubbers.clear();
+                        s.layout_generation = None;
+                    }
+                }
                 if let Some(state) = self.surfaces.get_mut(&info.id) {
                     if state.info.caps != info.caps {
                         output.extend(self.keys.release_surface(info.id));
@@ -167,24 +204,30 @@ impl Core {
                     self.resolve_surface(id, &mut output);
                 }
             }
-            Input::SurfaceRemoved(id) | Input::Revoked { surface: id } => {
-                output.extend(self.keys.release_surface(id));
-                if let Some(surface) = self.surfaces.remove(&id) {
-                    if let Some((timer, _)) = surface.profile_timer {
-                        self.timers.cancel(timer);
-                    }
-                    for item in surface.scene.items {
-                        self.placement_change(
-                            id,
-                            PlacementChange::Remove {
-                                instance: item.instance,
-                            },
-                            &mut output,
-                        );
-                    }
-                }
+            Input::SurfaceRemoved(id) => {
+                self.remove_surface(id, CancelReason::SurfaceRemoved, &mut output);
+            }
+            Input::Revoked { surface: id } => {
+                self.remove_surface(id, CancelReason::Revoked, &mut output);
+            }
+            Input::Touch {
+                surface,
+                contact,
+                phase,
+                x,
+                y,
+            } => {
+                self.touch(surface, contact, phase, Point { x, y }, &mut output);
             }
             Input::Mode { surface, mode } => {
+                if mode == Mode::Native
+                    && self
+                        .surfaces
+                        .get(&surface)
+                        .is_some_and(|s| s.info.caps.modes && s.mode != mode)
+                {
+                    self.cancel_surface(surface, CancelReason::Mode, &mut output);
+                }
                 if let Some(state) = self.surfaces.get_mut(&surface) {
                     if !state.info.caps.modes {
                         warn(&mut output, "surface does not support modes");
@@ -208,21 +251,20 @@ impl Core {
                 generation,
                 hit_map,
                 representations,
+                scrubbers,
             } => {
                 if let Some(state) = self.surfaces.get_mut(&surface)
                     && state.mode == Mode::Display
                     && state.generation == generation
+                    && state.render_info.as_ref() == Some(&state.info)
                 {
-                    if hit_map.iter().any(|hit| {
-                        [hit.rect.x, hit.rect.y, hit.rect.width, hit.rect.height]
-                            .iter()
-                            .any(|n| !n.is_finite())
-                            || hit.rect.width < 0.0
-                            || hit.rect.height < 0.0
-                    }) {
-                        warn(&mut output, "invalid hit map");
+                    if hit_map.iter().any(|hit| !touches::valid_rect(hit.rect))
+                        || !touches::valid_scrubbers(&scrubbers, self.config.max_records)
+                    {
+                        warn(&mut output, "invalid layout geometry");
                         return output;
                     }
+                    state.scrubbers = scrubbers;
                     state.hit_map = hit_map;
                     state.representations = representations;
                     state.layout_generation = Some(generation);
@@ -237,6 +279,7 @@ impl Core {
                     && state.generation == generation
                 {
                     state.frame_pending = false;
+                    self.flush_slider_frame(surface);
                 }
             }
             Input::Fact { name, value } => {
@@ -289,13 +332,23 @@ impl Core {
                 self.desktop = capabilities;
             }
             Input::Timer { id } => {
-                for (_, task) in self.timers.take_due(now, id) {
+                for (timer, task) in self.timers.take_due(now, id) {
                     match task {
+                        CoreTimer::Hold {
+                            surface,
+                            contact,
+                            instance,
+                        } => self.hold_contact(surface, contact, instance, timer),
                         CoreTimer::Profile { surface } => {
+                            for instance in
+                                self.instances.values_mut().filter(|i| i.surface == surface)
+                            {
+                                instance.discard_physical_work();
+                            }
+                            self.cancel_surface(surface, CancelReason::Profile, &mut output);
                             if let Some(state) = self.surfaces.get_mut(&surface) {
                                 state.profile_timer = None;
                                 if state.profile.expire(now) {
-                                    // T7 cancels captures before the deadline commits.
                                     self.reconcile_scene(surface, &mut output);
                                 }
                             }
@@ -372,12 +425,13 @@ impl Core {
                 }
             }
             // These inputs have no recipient until the dependent state machines create one.
-            Input::Touch { .. }
-            | Input::Key { .. }
+            Input::Key { .. }
             | Input::EffectDone { .. }
             | Input::SubscriptionData { .. }
             | Input::SubscriptionLost { .. } => {}
         }
+        self.synchronize_captures(&mut output);
+        self.finish_pending_profiles(&mut output);
         self.synchronize_instances(&mut output);
         self.synchronize_instance_timers();
         for instance in self.instances.values_mut() {
@@ -405,15 +459,15 @@ impl Core {
         }
     }
     fn resolve_surface(&mut self, id: SurfaceId, output: &mut Vec<Output>) {
+        let guards = self.profile_guards(id);
         let Some(surface) = self.surfaces.get_mut(&id) else {
             return;
         };
         surface.resolution = resolve(&self.catalog, &self.facts, &surface.info);
-        // Captures and their membership notifications are connected in T7.
         surface.profile.request(
             self.now,
             surface.resolution.selected.clone(),
-            0,
+            guards,
             self.config.profile_pending_ms,
         );
         self.sync_profile_timer(id);
@@ -481,6 +535,7 @@ impl Core {
                 self.instances.insert(instance.number, logic);
             }
             PlacementChange::Remove { instance } => {
+                self.cancel_instance(instance, CancelReason::Profile, output);
                 output.extend(self.keys.release_owner(KeyOwner::Logic(instance)));
                 if let Some(mut logic) = self.instances.remove(&instance.number) {
                     output.extend(logic.dispose(&mut self.next_call));
@@ -488,7 +543,34 @@ impl Core {
             }
         }
     }
+    fn remove_surface(&mut self, id: SurfaceId, reason: CancelReason, output: &mut Vec<Output>) {
+        self.cancel_surface(id, reason, output);
+        output.extend(self.keys.release_surface(id));
+        if let Some(surface) = self.surfaces.remove(&id) {
+            if let Some((timer, _)) = surface.profile_timer {
+                self.timers.cancel(timer);
+            }
+            for item in surface.scene.items {
+                self.placement_change(
+                    id,
+                    PlacementChange::Remove {
+                        instance: item.instance,
+                    },
+                    output,
+                );
+            }
+        }
+    }
     fn synchronize_instances(&mut self, output: &mut Vec<Output>) {
+        let faults: Vec<_> = self
+            .instances
+            .values()
+            .filter(|i| i.status == InstanceStatus::Faulted)
+            .map(|i| i.id)
+            .collect();
+        for id in faults {
+            self.cancel_instance(id, CancelReason::Fault, output);
+        }
         for instance in self.instances.values_mut() {
             let visible = self.surfaces.get(&instance.surface).is_some_and(|s| {
                 s.mode == Mode::Display && s.scene.items.iter().any(|i| i.instance == instance.id)
@@ -506,9 +588,13 @@ impl Core {
                     .filter(|i| i.id == item.instance)
                 {
                     instance.set = item.set.clone();
-                    if item.status != instance.status || item.state != instance.state {
+                    if item.status != instance.status
+                        || item.state != instance.state
+                        || item.interactions != instance.interactions
+                    {
                         item.status = instance.status;
                         item.state = instance.state.clone();
+                        item.interactions = instance.interactions.clone();
                         surface.dirty = true;
                     }
                 }
@@ -581,6 +667,7 @@ impl Core {
             .next_generation
             .checked_add(1)
             .expect("render generation exhausted");
+        surface.render_info = Some(surface.info.clone());
         surface.dirty = false;
         surface.frame_pending = true;
         output.push(Output::Render {

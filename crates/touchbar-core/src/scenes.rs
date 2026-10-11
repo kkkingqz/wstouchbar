@@ -96,6 +96,11 @@ pub(crate) fn compose(
                 slot: slot.id.clone(),
                 set: set.clone(),
                 state,
+                interactions: previous
+                    .items
+                    .iter()
+                    .find(|i| i.instance == instance)
+                    .map_or_else(Vec::new, |i| i.interactions.clone()),
                 plane: ScenePlane::Profile,
                 units: UnitSize::resolve(surface, set.units, profile.units),
                 status: previous

@@ -52,6 +52,36 @@ pub struct SceneItem {
     pub plane: ScenePlane,
     pub units: UnitSize,
     pub status: InstanceStatus,
+    /// Host interaction state, independent of the logic plugin's state patch.
+    pub interactions: Vec<WidgetInteraction>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScrubberState {
+    pub offset_px: f32,
+    pub highlighted: Option<String>,
+    pub selected: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WidgetInteraction {
+    pub widget: WidgetId,
+    pub record_key: Option<String>,
+    pub pressed: bool,
+    pub value: Option<f64>,
+    pub scrubber: ScrubberState,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScrubberItemGeometry {
+    pub record_key: String,
+    /// Unscrolled content coordinates, relative to the viewport origin.
+    pub rect: Rect,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScrubberLayout {
+    pub instance: InstanceId,
+    pub widget: WidgetId,
+    pub viewport: Rect,
+    pub content_width: f32,
+    pub items: Vec<ScrubberItemGeometry>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -88,6 +118,7 @@ pub enum Input {
         generation: Generation,
         hit_map: HitMap,
         representations: Representations,
+        scrubbers: Vec<ScrubberLayout>,
     },
     Fact {
         name: FactName,
@@ -225,4 +256,11 @@ pub struct CoreSnapshot {
     pub plugins: Vec<PluginId>,
     pub now: Timestamp,
     pub instances: Vec<InstanceSnapshot>,
+    pub captures: Vec<CaptureSnapshot>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CaptureSnapshot {
+    pub surface: SurfaceId,
+    pub contact: ContactId,
+    pub target: HitTarget,
 }

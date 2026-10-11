@@ -118,6 +118,7 @@ fn native_ignores_late_layout_and_frame_done() {
         surface: SurfaceId(1),
         generation,
         hit_map: vec![],
+        scrubbers: vec![],
         representations: vec![],
     };
     assert!(c.handle(Timestamp(3), layout).is_empty());
@@ -146,6 +147,7 @@ fn reconnect_reuses_id_but_not_render_generation() {
             surface: SurfaceId(2),
             generation: first,
             hit_map: vec![],
+            scrubbers: vec![],
             representations: vec![],
         },
     );
