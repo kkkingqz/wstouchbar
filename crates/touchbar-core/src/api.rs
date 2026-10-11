@@ -129,6 +129,7 @@ pub struct PresentationLayout {
 pub type Representations = Vec<(InstanceId, String)>;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Input {
+    Locale(String),
     SurfaceAdded(SurfaceInfo),
     SurfaceChanged(SurfaceInfo),
     SurfaceRemoved(SurfaceId),

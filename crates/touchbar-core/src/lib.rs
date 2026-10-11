@@ -3,6 +3,7 @@
 mod api;
 mod checkpoints;
 mod config;
+mod context;
 pub use checkpoints::*;
 mod effects;
 mod gestures;
@@ -92,6 +93,7 @@ pub struct Core {
     config: CoreConfig,
     bindings: Vec<layers::SourceBindings>,
     now: Timestamp,
+    locale: String,
     catalog: Catalog,
     facts: Facts,
     surfaces: BTreeMap<SurfaceId, SurfaceState>,
@@ -119,6 +121,7 @@ impl Core {
             config,
             bindings: vec![],
             now: Timestamp(0),
+            locale: "C".into(),
             catalog: Catalog::default(),
             facts: Facts::new(),
             surfaces: BTreeMap::new(),
@@ -219,6 +222,16 @@ impl Core {
         }
         self.now = now;
         match input {
+            Input::Locale(locale) => {
+                if locale.is_empty()
+                    || locale.contains('\0')
+                    || locale.len() > self.config.max_text_bytes
+                {
+                    warn(&mut output, "invalid locale");
+                    return output;
+                }
+                self.locale = locale;
+            }
             Input::SurfaceAdded(info) => {
                 if !self.valid_surface(&info, &mut output) {
                     return output;
@@ -629,6 +642,7 @@ impl Core {
         self.synchronize_captures(&mut output);
         self.finish_pending_profiles(&mut output);
         self.synchronize_instances(&mut output);
+        self.synchronize_contexts(&mut output);
         self.prepare_subscriptions(&mut output);
         self.synchronize_effects(&mut output);
         self.start_subscriptions(&mut output);

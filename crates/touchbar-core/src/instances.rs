@@ -38,6 +38,7 @@ pub(crate) struct Instance {
     failures: u32,
     fault: Option<String>,
     description: Option<LogicDescription>,
+    context: Option<LogicContext>,
     queue: VecDeque<QueuedCall>,
     in_flight: Option<InFlight>,
 }
@@ -72,6 +73,7 @@ impl Instance {
             failures: 0,
             fault: None,
             description: None,
+            context: None,
             queue: VecDeque::new(),
             in_flight: None,
         }
@@ -159,6 +161,19 @@ impl Instance {
             physical: None,
         });
         vec![]
+    }
+    pub fn context_changed(&mut self, context: LogicContext) {
+        if self.set.logic.is_none()
+            || !matches!(
+                self.status,
+                InstanceStatus::Hidden | InstanceStatus::Visible
+            )
+            || self.context.as_ref() == Some(&context)
+        {
+            return;
+        }
+        self.context = Some(context.clone());
+        self.enqueue(LogicEvent::ContextChanged(context));
     }
     pub fn enqueue(&mut self, event: LogicEvent) {
         self.enqueue_physical(event, None);
@@ -400,6 +415,7 @@ impl Instance {
         self.status = InstanceStatus::Loading;
         self.runtime_alive = true;
         self.description = None;
+        self.context = None;
         self.state.clear();
         self.queue.clear();
         self.in_flight = None;

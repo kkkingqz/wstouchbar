@@ -24,6 +24,7 @@ impl Core {
 | `Mode{surface, display\|native}`, `Revoked{surface}` | `touchbard` |
 | `Layout{surface, generation, hit_map, representations, scrubbers, slots, presentation}` | рендер: карта попаданий (прямоугольники виджетов в пикселях) и выбранные варианты `responsive` в ответ на `Render` |
 | `Fact{name, value \| absent}` | бэкенд рабочего стола, `touchbar-apps`, модули media и audio |
+| `Locale(String)` | оболочка: локаль сессии, до первого сообщения `C`; ядро не читает окружение (D56) |
 | `DesktopCapabilities{key}` | оболочка: доступность ввода клавиш из `BackendReady` рабочего стола; при потере возможности ядро отпускает удерживаемые клавиши этого маршрута |
 | `Catalog(PluginCatalog)` | загрузчик плагинов: наборы, профили, категории, привязки, уже проверенные |
 | `LogicDescribed{instance, description, persisted}` | runtime, после загрузки модуля и чтения сохранённых полей по ключу (D55) |

@@ -145,7 +145,7 @@ fn layout(c: &mut Core, at: u64, surface: u64, map: HitMap, bounds: Option<Rect>
         id: s.scene.presentation.as_ref().unwrap().id,
         bounds,
     });
-    c.handle(
+    let out = c.handle(
         Timestamp(at),
         Input::Layout {
             surface: SurfaceId(surface),
@@ -160,6 +160,24 @@ fn layout(c: &mut Core, at: u64, surface: u64, map: HitMap, bounds: Option<Rect>
             presentation,
         },
     );
+    // The fake runtime acknowledges context metadata before panel actions.
+    for command in out {
+        if let Output::CallLogic {
+            instance,
+            call,
+            invocation: LogicCall::Handle(LogicEvent::ContextChanged(_)),
+        } = command
+        {
+            c.handle(
+                Timestamp(at),
+                Input::LogicUpdate {
+                    instance,
+                    call,
+                    update: LogicUpdate::default(),
+                },
+            );
+        }
+    }
 }
 fn frame(c: &mut Core, at: u64, surface: u64) {
     let generation = c
