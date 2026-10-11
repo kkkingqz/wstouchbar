@@ -228,6 +228,7 @@ fn catalog_is_retained_if_replacement_is_invalid() {
     let good = Catalog {
         plugins: vec![PluginSpec {
             id: "test".parse().unwrap(),
+            revision: "test-v1".into(),
             enabled: true,
             has_logic: false,
             requires: vec![],

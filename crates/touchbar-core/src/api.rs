@@ -1,3 +1,4 @@
+use crate::{ProfileSwitch, Resolution};
 use serde::{Deserialize, Serialize};
 use touchbar_model::*;
 
@@ -184,6 +185,8 @@ pub struct SurfaceSnapshot {
     pub generation: Generation,
     pub layout_generation: Option<Generation>,
     pub scene: Scene,
+    pub resolution: Resolution,
+    pub profile: ProfileSwitch,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoreSnapshot {

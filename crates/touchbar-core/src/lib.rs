@@ -3,10 +3,14 @@
 mod api;
 mod config;
 mod keys;
+mod profiles;
+mod scenes;
 mod timers;
 pub use api::*;
 pub use config::*;
 pub use keys::*;
+pub use profiles::*;
+use scenes::{Placement, PlacementChange, compose};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use timers::*;
@@ -23,10 +27,16 @@ struct SurfaceState {
     representations: Representations,
     frame_pending: bool,
     dirty: bool,
+    resolution: Resolution,
+    profile: ProfileSwitch,
+    profile_timer: Option<(TimerId, Timestamp)>,
+    placements: Vec<Placement>,
 }
 // Timer purposes are added by the dependent state machines starting in T5.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-enum CoreTimer {}
+enum CoreTimer {
+    Profile { surface: SurfaceId },
+}
 #[derive(Clone, Debug)]
 pub struct Core {
     config: CoreConfig,
@@ -35,6 +45,7 @@ pub struct Core {
     facts: Facts,
     surfaces: BTreeMap<SurfaceId, SurfaceState>,
     next_generation: u64,
+    next_instance: u64,
     timers: TimerRegistry<CoreTimer>,
     keys: KeyTracker,
     desktop: DesktopCapabilities,
@@ -50,6 +61,7 @@ impl Core {
             facts: Facts::new(),
             surfaces: BTreeMap::new(),
             next_generation: 1,
+            next_instance: 1,
             timers: TimerRegistry::default(),
             keys: KeyTracker::default(),
             desktop: DesktopCapabilities::default(),
@@ -69,6 +81,8 @@ impl Core {
                     generation: s.generation,
                     layout_generation: s.layout_generation,
                     scene: s.scene.clone(),
+                    resolution: s.resolution.clone(),
+                    profile: s.profile.clone(),
                 })
                 .collect(),
         }
@@ -110,9 +124,13 @@ impl Core {
                         representations: vec![],
                         frame_pending: false,
                         dirty: true,
+                        resolution: Resolution::default(),
+                        profile: ProfileSwitch::default(),
+                        profile_timer: None,
+                        placements: vec![],
                     },
                 );
-                self.render(id, &mut output);
+                self.resolve_surface(id, &mut output);
             }
             Input::SurfaceChanged(info) => {
                 if !self.valid_surface(&info, &mut output) {
@@ -136,12 +154,26 @@ impl Core {
                     let id = info.id;
                     state.info = info;
                     state.dirty = true;
-                    self.render(id, &mut output);
+                    self.resolve_surface(id, &mut output);
                 }
             }
             Input::SurfaceRemoved(id) | Input::Revoked { surface: id } => {
                 output.extend(self.keys.release_surface(id));
-                self.surfaces.remove(&id);
+                if let Some(surface) = self.surfaces.remove(&id) {
+                    if let Some((timer, _)) = surface.profile_timer {
+                        self.timers.cancel(timer);
+                    }
+                    for item in surface.scene.items {
+                        self.placement_change(
+                            id,
+                            PlacementChange::Remove {
+                                instance: item.instance,
+                                set: item.set,
+                            },
+                            &mut output,
+                        );
+                    }
+                }
             }
             Input::Mode { surface, mode } => {
                 if let Some(state) = self.surfaces.get_mut(&surface) {
@@ -216,6 +248,7 @@ impl Core {
                         self.facts.remove(&name);
                     }
                 }
+                self.resolve_surfaces(&mut output);
             }
             Input::Catalog(catalog) => {
                 let issues = catalog.validate();
@@ -230,6 +263,7 @@ impl Core {
                 }
                 if !invalid {
                     self.catalog = catalog;
+                    self.resolve_surfaces(&mut output);
                 }
             }
             Input::DesktopCapabilities(capabilities) => {
@@ -239,8 +273,19 @@ impl Core {
                 self.desktop = capabilities;
             }
             Input::Timer { id } => {
-                // Timer purposes are introduced by the dependent state machines.
-                let _ = self.timers.take_due(now, id);
+                for (_, task) in self.timers.take_due(now, id) {
+                    match task {
+                        CoreTimer::Profile { surface } => {
+                            if let Some(state) = self.surfaces.get_mut(&surface) {
+                                state.profile_timer = None;
+                                if state.profile.expire(now) {
+                                    // T7 cancels captures before the deadline commits.
+                                    self.reconcile_scene(surface, &mut output);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             // These inputs have no recipient until the dependent state machines create one.
             Input::Touch { .. }
@@ -261,6 +306,92 @@ impl Core {
             false
         } else {
             true
+        }
+    }
+    fn resolve_surfaces(&mut self, output: &mut Vec<Output>) {
+        let surfaces: Vec<_> = self.surfaces.keys().copied().collect();
+        for id in surfaces {
+            self.resolve_surface(id, output);
+        }
+    }
+    fn resolve_surface(&mut self, id: SurfaceId, output: &mut Vec<Output>) {
+        let Some(surface) = self.surfaces.get_mut(&id) else {
+            return;
+        };
+        surface.resolution = resolve(&self.catalog, &self.facts, &surface.info);
+        // Captures and their membership notifications are connected in T7.
+        surface.profile.request(
+            self.now,
+            surface.resolution.selected.clone(),
+            0,
+            self.config.profile_pending_ms,
+        );
+        self.sync_profile_timer(id);
+        self.reconcile_scene(id, output);
+    }
+    fn sync_profile_timer(&mut self, id: SurfaceId) {
+        let Some(surface) = self.surfaces.get_mut(&id) else {
+            return;
+        };
+        let deadline = surface.profile.pending.as_ref().map(|p| p.deadline);
+        if surface.profile_timer.map(|(_, at)| at) == deadline {
+            return;
+        }
+        if let Some((timer, _)) = surface.profile_timer.take() {
+            self.timers.cancel(timer);
+        }
+        if let Some(at) = deadline {
+            surface.profile_timer = Some((
+                self.timers.schedule(at, CoreTimer::Profile { surface: id }),
+                at,
+            ));
+        }
+    }
+    fn reconcile_scene(&mut self, id: SurfaceId, output: &mut Vec<Output>) {
+        let Some(surface) = self.surfaces.get_mut(&id) else {
+            return;
+        };
+        let composition = compose(
+            &self.catalog,
+            &surface.info,
+            surface.profile.active.as_ref(),
+            &surface.scene,
+            &surface.placements,
+            &mut self.next_instance,
+        );
+        if surface.scene != composition.scene {
+            surface.dirty = true;
+        }
+        surface.scene = composition.scene;
+        surface.placements = composition.placements;
+        for change in composition.changes {
+            self.placement_change(id, change, output);
+        }
+        self.render(id, output);
+    }
+    fn placement_change(
+        &mut self,
+        surface: SurfaceId,
+        change: PlacementChange,
+        output: &mut Vec<Output>,
+    ) {
+        match change {
+            PlacementChange::Create { instance, set } => {
+                if let Some(plugin) = set.logic {
+                    output.push(Output::CreateInstance {
+                        instance,
+                        surface,
+                        plugin,
+                        set: set.reference,
+                    });
+                }
+            }
+            PlacementChange::Remove { instance, set } => {
+                output.extend(self.keys.release_owner(KeyOwner::Logic(instance)));
+                if set.logic.is_some() {
+                    output.push(Output::DisposeInstance { instance });
+                }
+            }
         }
     }
     fn render(&mut self, id: SurfaceId, output: &mut Vec<Output>) {
@@ -396,5 +527,47 @@ mod transition_tests {
                 phase: KeyPhase::Released
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod profile_timer_tests {
+    use super::*;
+    #[test]
+    fn pending_target_updates_keep_the_same_advertised_timer() {
+        let mut core = Core::new(CoreConfig::default());
+        let info = SurfaceInfo {
+            id: SurfaceId(1),
+            name: "headless:main".parse().unwrap(),
+            kind: SurfaceKind::Headless,
+            width_px: 100,
+            height_px: 10,
+            px_per_mm: 5.0,
+            caps: SurfaceCaps::default(),
+        };
+        core.handle(Timestamp(0), Input::SurfaceAdded(info));
+        // T7 supplies real contact membership. Exercise the profile subsystem here.
+        let state = core.surfaces.get_mut(&SurfaceId(1)).unwrap();
+        state
+            .profile
+            .request(Timestamp(0), Some("p/a".parse().unwrap()), 0, 1500);
+        state
+            .profile
+            .request(Timestamp(10), Some("p/b".parse().unwrap()), 1, 1500);
+        core.sync_profile_timer(SurfaceId(1));
+        assert!(matches!(
+            core.timers.notify().as_slice(),
+            [TimerChange::Set {
+                at: Timestamp(1510),
+                ..
+            }]
+        ));
+        core.surfaces
+            .get_mut(&SurfaceId(1))
+            .unwrap()
+            .profile
+            .request(Timestamp(1000), Some("p/c".parse().unwrap()), 1, 1500);
+        core.sync_profile_timer(SurfaceId(1));
+        assert!(core.timers.notify().is_empty());
     }
 }

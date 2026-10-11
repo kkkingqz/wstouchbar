@@ -8,7 +8,12 @@ modes, facts/catalog storage, generation-checked layout and frame responses,
 timer scheduling, and reference-counted key leases with teardown releases.
 Desktop key routing is explicit and requires the backend's capability.
 
-Profile resolution, instance lifecycle, touch captures, panels, bindings, and
-effects are added in T5–T10. Their input variants are defined here; until the
-corresponding state machines exist they have no recipients. Timer purposes and
-fact notifications are connected as those subsystems are implemented.
+T5 adds profile resolution with an explanation of candidates, conflicts and
+user choices; the Active/Pending switch; and scene reconciliation per surface.
+Placements preserve their IDs when slot, set, config and content revisions match.
+Changes to a shared logic provider recreate its consumers. Static sets do not
+create a wasm runtime instance.
+
+The profile switch and timer integration are tested independently. Touch capture
+membership and deadline cancellation connect in T7. Instance lifecycle, panels,
+bindings and effects are added in T6–T10; their inputs acquire recipients there.

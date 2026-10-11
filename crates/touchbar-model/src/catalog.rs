@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PluginSpec {
     pub id: PluginId,
+    /// Stable content identity supplied by the loader, not the manifest version.
+    pub revision: String,
     pub enabled: bool,
     pub has_logic: bool,
     pub requires: Vec<PluginId>,
@@ -163,6 +165,14 @@ pub struct Catalog {
     pub sets: Vec<SetSpec>,
     pub profiles: Vec<ProfileSpec>,
     pub bindings: Vec<Binding<LayerAction>>,
+    #[serde(default)]
+    pub profile_for: Vec<ProfileOverride>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProfileOverride {
+    pub surface: Option<SurfaceName>,
+    pub target: ProfileTarget,
+    pub profile: ProfileRef,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CatalogIssueCode {
@@ -425,6 +435,20 @@ impl Catalog {
                     CatalogIssueCode::UnknownSet,
                     &binding.id,
                     &reference.to_string(),
+                );
+            }
+        }
+        for (i, choice) in self.profile_for.iter().enumerate() {
+            if !self.profiles.iter().any(|p| p.reference == choice.profile)
+                || self.profile_for[..i].iter().any(|previous| {
+                    previous.surface == choice.surface && previous.target == choice.target
+                })
+            {
+                issue(
+                    &mut issues,
+                    CatalogIssueCode::InvalidProfile,
+                    "profile-for",
+                    "missing profile or duplicate selection for the same surface and target",
                 );
             }
         }

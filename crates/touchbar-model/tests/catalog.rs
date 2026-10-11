@@ -3,6 +3,7 @@ use touchbar_model::*;
 fn catalog() -> Catalog {
     let plugin = PluginSpec {
         id: "controls".parse().unwrap(),
+        revision: "controls-v1".into(),
         enabled: true,
         has_logic: true,
         requires: vec![],
@@ -26,6 +27,7 @@ fn catalog() -> Catalog {
         sets: vec![set],
         profiles: vec![profile],
         bindings: vec![],
+        profile_for: vec![],
     }
 }
 fn rejects(c: &Catalog, code: CatalogIssueCode) {
