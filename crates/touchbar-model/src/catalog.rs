@@ -296,6 +296,17 @@ impl Catalog {
                         "invalid widget width",
                     );
                 }
+                if widget.hold_ms.is_none()
+                    && (widget.handlers.contains_key(&ActionKind::LongPressed)
+                        || widget.press_and_hold_panel.is_some())
+                {
+                    issue(
+                        &mut issues,
+                        CatalogIssueCode::InvalidWidget,
+                        &location,
+                        "hold handler or panel requires an explicit hold duration",
+                    );
+                }
                 if widget.hold_ms == Some(0) {
                     issue(
                         &mut issues,

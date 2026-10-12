@@ -283,6 +283,9 @@ fn pending_expiry_via_fact_must_discard_recent_physical_callback() {
     let (mut c, id) = setup(WidgetKind::Button, true);
     let mut cat = catalog(WidgetKind::Button, true);
     cat.sets[0].widgets[0].hold_ms = None;
+    cat.sets[0].widgets[0]
+        .handlers
+        .remove(&ActionKind::LongPressed);
     cat.profiles[1].slots = cat.profiles[0].slots.clone();
     c.handle(Timestamp(1), Input::Catalog(cat));
     let down = touch(&mut c, 10, 1, TouchPhase::Down, 20.0, 20.0);

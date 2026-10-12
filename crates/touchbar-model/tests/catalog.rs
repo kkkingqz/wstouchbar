@@ -345,3 +345,27 @@ fn conflicting_binding_triggers_are_reported_by_catalog_validation() {
     c.bindings = vec![b, other];
     rejects(&c, CatalogIssueCode::InvalidBinding);
 }
+
+#[test]
+fn hold_callback_and_panel_require_explicit_positive_duration() {
+    for panel in [false, true] {
+        let mut c = catalog();
+        let mut w = WidgetSpec::new("hold".parse().unwrap(), WidgetKind::Button);
+        if panel {
+            c.sets[0].panels.push(PanelSpec {
+                id: "expanded".parse().unwrap(),
+                widgets: vec![],
+                dismiss_on_selection: false,
+                principal_item: None,
+                dismissal: DismissalPolicy::default(),
+            });
+            w.press_and_hold_panel = Some("expanded".parse().unwrap());
+        } else {
+            w.handlers.insert(ActionKind::LongPressed, "hold".into());
+        }
+        c.sets[0].widgets.push(w);
+        rejects(&c, CatalogIssueCode::InvalidWidget);
+        c.sets[0].widgets[0].hold_ms = Some(420);
+        assert!(c.validate().is_empty(), "{:?}", c.validate());
+    }
+}
