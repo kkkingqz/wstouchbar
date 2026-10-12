@@ -23,6 +23,16 @@ pub(crate) struct Capture {
     unit_px: f32,
 }
 impl Capture {
+    fn physical_context(&self) -> crate::presentations::PhysicalContext {
+        crate::presentations::PhysicalContext {
+            surface: self.surface,
+            contact: self.contact,
+            capture: self.identity,
+            target: self.target.clone(),
+            presentation: self.presentation,
+        }
+    }
+
     fn snapshot(&self) -> CaptureSnapshot {
         CaptureSnapshot {
             id: self.identity,
@@ -32,6 +42,24 @@ impl Capture {
         }
     }
 }
+fn hit_candidates(surface: &SurfaceState) -> impl Iterator<Item = (usize, &HitTarget)> {
+    let top = surface
+        .scene
+        .items
+        .iter()
+        .rev()
+        .find(|i| matches!(i.plane, ScenePlane::Layer(_)))
+        .map(|i| (i.instance, i.plane));
+    surface.hit_map.iter().enumerate().filter(move |(_, h)| {
+        if surface.presentation.is_some() {
+            h.plane == ScenePlane::Presentation
+        } else {
+            h.plane != ScenePlane::Presentation
+                && top.is_none_or(|(instance, plane)| h.instance == instance && h.plane == plane)
+        }
+    })
+}
+
 impl Core {
     pub(crate) fn touch(
         &mut self,
@@ -173,47 +201,15 @@ impl Core {
         else {
             return;
         };
-        let top = s
-            .scene
-            .items
-            .iter()
-            .rev()
-            .find(|i| matches!(i.plane, ScenePlane::Layer(_)))
-            .map(|i| (i.instance, i.plane));
         // Duplicate Down cannot silently replace a live capture.
         if s.captures.contains_key(&contact) {
             return;
         }
-        let direct = s
-            .hit_map
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| {
-                if s.presentation.is_some() {
-                    h.plane == ScenePlane::Presentation
-                } else {
-                    h.plane != ScenePlane::Presentation
-                        && top.is_none_or(|(instance, plane)| {
-                            h.instance == instance && h.plane == plane
-                        })
-                }
-            })
+        let direct = hit_candidates(s)
             .filter(|(_, h)| h.rect.contains(point))
             .max_by_key(|(order, h)| (h.plane, *order));
         let fallback = || {
-            s.hit_map
-                .iter()
-                .enumerate()
-                .filter(|(_, h)| {
-                    if s.presentation.is_some() {
-                        h.plane == ScenePlane::Presentation
-                    } else {
-                        h.plane != ScenePlane::Presentation
-                            && top.is_none_or(|(instance, plane)| {
-                                h.instance == instance && h.plane == plane
-                            })
-                    }
-                })
+            hit_candidates(s)
                 .filter_map(|(order, h)| {
                     h.rect
                         .vertical_distance(point)
@@ -602,13 +598,7 @@ impl Core {
                     origin,
                     cancel_reason,
                 }),
-                (kind != ActionKind::Cancelled).then(|| crate::presentations::PhysicalContext {
-                    surface: capture.surface,
-                    contact: capture.contact,
-                    capture: capture.identity,
-                    target: capture.target.clone(),
-                    presentation: capture.presentation,
-                }),
+                (kind != ActionKind::Cancelled).then(|| capture.physical_context()),
             );
         }
     }
@@ -638,13 +628,7 @@ impl Core {
         if let Some(panel) = panel {
             self.open_presentation(
                 capture.target.instance,
-                crate::presentations::PhysicalContext {
-                    surface: capture.surface,
-                    contact: capture.contact,
-                    capture: capture.identity,
-                    target: capture.target.clone(),
-                    presentation: capture.presentation,
-                },
+                capture.physical_context(),
                 panel,
                 touchbar_model::Placement::Anchored,
                 lifecycle,

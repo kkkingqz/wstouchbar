@@ -42,6 +42,16 @@ pub(crate) struct Instance {
     queue: VecDeque<QueuedCall>,
     in_flight: Option<InFlight>,
 }
+fn is_physical_action(call: &LogicCall) -> bool {
+    matches!(
+        call,
+        LogicCall::Handle(LogicEvent::Action(ActionEvent {
+            origin: Origin::Physical,
+            ..
+        }))
+    )
+}
+
 impl Instance {
     pub fn new(
         id: InstanceId,
@@ -210,19 +220,10 @@ impl Instance {
         });
     }
     pub fn has_physical_work(&self) -> bool {
-        let physical = |call: &LogicCall| {
-            matches!(
-                call,
-                LogicCall::Handle(LogicEvent::Action(ActionEvent {
-                    origin: Origin::Physical,
-                    ..
-                }))
-            )
-        };
         self.in_flight
             .as_ref()
-            .is_some_and(|c| !c.discard_update && physical(&c.invocation))
-            || self.queue.iter().any(|c| physical(&c.invocation))
+            .is_some_and(|c| !c.discard_update && is_physical_action(&c.invocation))
+            || self.queue.iter().any(|c| is_physical_action(&c.invocation))
     }
     pub fn invalidate_capture_context(&mut self, capture: CaptureId) {
         for queued in &mut self.queue {
@@ -244,15 +245,6 @@ impl Instance {
         }
     }
     pub fn discard_physical_work(&mut self, active: &BTreeSet<CaptureId>) {
-        let physical = |call: &LogicCall| {
-            matches!(
-                call,
-                LogicCall::Handle(LogicEvent::Action(ActionEvent {
-                    origin: Origin::Physical,
-                    ..
-                }))
-            )
-        };
         let mut abandoned = vec![];
         let mut seen = BTreeSet::new();
         for context in self
@@ -267,7 +259,7 @@ impl Instance {
         }
         // An existing hardware cancellation is cleanup, not an old action.
         self.queue.retain(|call| {
-            !physical(&call.invocation)
+            !is_physical_action(&call.invocation)
                 || matches!(
                     call.invocation,
                     LogicCall::Handle(LogicEvent::Action(ActionEvent {
@@ -277,7 +269,7 @@ impl Instance {
                 )
         });
         if let Some(flight) = &mut self.in_flight
-            && physical(&flight.invocation)
+            && is_physical_action(&flight.invocation)
             && !matches!(
                 flight.invocation,
                 LogicCall::Handle(LogicEvent::Action(ActionEvent {
