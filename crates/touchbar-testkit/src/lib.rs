@@ -18,3 +18,5 @@ pub mod fixtures;
 mod invariants;
 pub use invariants::*;
 pub mod strategies;
+
+pub mod logic_strategies;

@@ -1334,8 +1334,11 @@ name = "touchbar-logic-sdk"
 version = "0.1.0"
 dependencies = [
  "log",
+ "proptest",
+ "serde_json",
  "touchbar-logic-types",
  "touchbar-model",
+ "touchbar-testkit",
  "wit-bindgen",
 ]
 

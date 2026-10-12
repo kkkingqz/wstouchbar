@@ -21,3 +21,12 @@ disallowed_types = "deny"
 cast_possible_truncation = "warn"
 cast_sign_loss = "warn"
 match_same_arms = "warn"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+touchbar-testkit = { path = "../touchbar-testkit" }
+serde_json.workspace = true
+proptest.workspace = true
+
+[[example]]
+name = "smoke"
+crate-type = ["cdylib"]

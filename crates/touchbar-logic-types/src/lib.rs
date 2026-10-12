@@ -212,3 +212,12 @@ fn subscription(value: &SubscriptionKind) -> usize {
         | SubscriptionKind::TimerInterval { .. } => 0,
     })
 }
+
+mod translation;
+
+/// A conversion may discard individual values the model cannot represent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Translation<T> {
+    pub value: T,
+    pub warnings: Vec<String>,
+}
