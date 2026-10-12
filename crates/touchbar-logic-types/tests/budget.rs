@@ -115,3 +115,50 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn call_budget_is_inclusive_and_counts_nested_input_payloads() {
+    use touchbar_logic_types::{check_call_budget, wire_size_call};
+    use touchbar_model::*;
+    let call = LogicCall::Init {
+        config: "ж".into(),
+        persisted: vec![],
+    };
+    assert_eq!(wire_size_call(&call), 74);
+    assert!(
+        check_call_budget(
+            &call,
+            &LogicLimits {
+                max_update_bytes: 74,
+                ..Default::default()
+            }
+        )
+        .is_ok()
+    );
+    assert!(
+        check_call_budget(
+            &call,
+            &LogicLimits {
+                max_update_bytes: 73,
+                ..Default::default()
+            }
+        )
+        .is_err()
+    );
+    let call = LogicCall::Handle(LogicEvent::SubscriptionData {
+        tag: "fact".into(),
+        data: SubscriptionData::Fact(Some(FactValue::Records(vec![
+            [("text".into(), Scalar::Text("x".repeat(1000)))].into(),
+        ]))),
+    });
+    assert!(
+        check_call_budget(
+            &call,
+            &LogicLimits {
+                max_update_bytes: 1000,
+                ..Default::default()
+            }
+        )
+        .is_err()
+    );
+}

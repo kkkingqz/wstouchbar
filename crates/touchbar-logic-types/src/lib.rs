@@ -106,6 +106,104 @@ pub fn check_budget(update: &LogicUpdate, limits: &LogicLimits) -> Result<(), Bu
     }
 }
 
+/// Estimate inputs before allocating their WIT representation, using the same global budget.
+pub fn wire_size_call(call: &LogicCall) -> usize {
+    match call {
+        LogicCall::Init { config, persisted } => {
+            total([64, text(config), state_patch_size(persisted)])
+        }
+        LogicCall::Handle(event) => total([64, event_size(event)]),
+    }
+}
+pub fn check_call_budget(call: &LogicCall, limits: &LogicLimits) -> Result<(), BudgetExceeded> {
+    let actual = wire_size_call(call);
+    if actual > limits.max_update_bytes {
+        Err(BudgetExceeded {
+            actual,
+            limit: limits.max_update_bytes,
+        })
+    } else {
+        Ok(())
+    }
+}
+fn state_patch_size(patch: &StatePatch) -> usize {
+    total(
+        patch
+            .iter()
+            .map(|(k, v)| total([16, text(k), state_value(v)])),
+    )
+}
+fn record_size(record: &RecordValue) -> usize {
+    total(record.iter().map(|(k, v)| total([16, text(k), scalar(v)])))
+}
+fn fact_size(value: &FactValue) -> usize {
+    total([
+        16,
+        match value {
+            FactValue::Text(v) => text(v),
+            FactValue::List(v) => total(v.iter().map(|v| total([16, text(v)]))),
+            FactValue::Records(v) => total(v.iter().map(|v| total([16, record_size(v)]))),
+            FactValue::Boolean(_) | FactValue::Number(_) => 8,
+        },
+    ])
+}
+fn error_size(error: &EffectError) -> usize {
+    match error {
+        EffectError::Failed(message) => total([16, text(message)]),
+        _ => 16,
+    }
+}
+fn event_size(event: &LogicEvent) -> usize {
+    total([
+        16,
+        match event {
+            LogicEvent::Action(action) => total([
+                text(&action.action),
+                action.value.as_ref().map_or(8, scalar),
+                optional_text(&action.record_key),
+                16,
+            ]),
+            LogicEvent::ContextChanged(ctx) => total([
+                text(&ctx.surface_kind),
+                text(&ctx.representation),
+                text(&ctx.color_scheme),
+                optional_text(&ctx.accent),
+                text(&ctx.locale),
+                8,
+            ]),
+            LogicEvent::PresentationClosed(panel) => text(panel.as_str()),
+            LogicEvent::EffectDone { tag, result } => total([
+                text(tag),
+                match result {
+                    Ok(EffectResult::Spawn(s)) => total([32, text(&s.stdout), text(&s.stderr)]),
+                    Ok(EffectResult::Dbus(v)) => dbus_value(v),
+                    Ok(EffectResult::None | EffectResult::Mute(_)) => 16,
+                    Err(e) => error_size(e),
+                },
+            ]),
+            LogicEvent::SubscriptionData { tag, data } => total([
+                text(tag),
+                match data {
+                    SubscriptionData::Audio(s) => total([32, text(&s.name)]),
+                    SubscriptionData::Media(s) => total([
+                        64,
+                        optional_text(&s.player),
+                        text(&s.title),
+                        text(&s.artist),
+                        text(&s.album),
+                        optional_text(&s.art_uri),
+                    ]),
+                    SubscriptionData::Fact(v) => v.as_ref().map_or(8, fact_size),
+                    SubscriptionData::Line(v) => text(v),
+                    SubscriptionData::Dbus(v) => dbus_value(v),
+                    SubscriptionData::Tick => 8,
+                },
+            ]),
+            LogicEvent::SubscriptionLost { tag, error } => total([text(tag), error_size(error)]),
+            LogicEvent::Shown | LogicEvent::Hidden => 0,
+        },
+    ])
+}
 fn total(values: impl IntoIterator<Item = usize>) -> usize {
     values.into_iter().fold(0, usize::saturating_add)
 }

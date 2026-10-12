@@ -8,6 +8,8 @@ pub mod translation {
         crate::bindings::exports::wstouchbar::logic::api
     );
 }
+mod limits;
+use limits::{MemoryLimiter, fault_reason};
 mod persist;
 pub use persist::*;
 use std::{
@@ -24,7 +26,7 @@ use touchbar_core::{Input, PersistKey};
 use touchbar_logic_types::LogicLimits;
 use touchbar_model::*;
 use wasmtime::component::{Component, HasSelf, Linker};
-use wasmtime::{Cache, CacheConfig, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Cache, CacheConfig, Config, Engine, Store};
 
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
@@ -81,11 +83,23 @@ pub struct CallResponse {
     pub duration: Duration,
 }
 struct HostState {
-    limits: StoreLimits,
+    limiter: MemoryLimiter,
+    limits: LogicLimits,
+    dropped: u64,
     logs: Vec<LogRecord>,
 }
 impl bindings::LogicImports for HostState {
     fn log(&mut self, level: bindings::LogLevel, message: String) {
+        if self.logs.len() >= self.limits.max_log_records {
+            self.dropped = self.dropped.saturating_add(1);
+            return;
+        }
+        let mut message = message;
+        let mut length = message.len().min(self.limits.max_log_message_bytes);
+        while !message.is_char_boundary(length) {
+            length -= 1;
+        }
+        message.truncate(length);
         self.logs.push(LogRecord {
             level: match level {
                 bindings::LogLevel::Trace => LogLevel::Trace,
@@ -96,6 +110,24 @@ impl bindings::LogicImports for HostState {
             },
             message,
         });
+    }
+}
+impl HostState {
+    fn reset_call(&mut self) {
+        self.logs.clear();
+        self.dropped = 0;
+        self.limiter.denied = false;
+    }
+    fn take_logs(&mut self) -> Vec<LogRecord> {
+        let mut logs = std::mem::take(&mut self.logs);
+        if self.dropped > 0 {
+            logs.push(LogRecord::warning(format!(
+                "{} guest log records dropped",
+                self.dropped
+            )));
+            self.dropped = 0;
+        }
+        logs
     }
 }
 struct Module {
@@ -239,19 +271,21 @@ impl Runtime {
         result
     }
     fn instantiate(&self, pre: &bindings::LogicPre<HostState>) -> Result<Instance, String> {
-        let limits = StoreLimitsBuilder::new()
-            .memory_size(self.config.limits.max_memory_bytes)
-            .build();
+        let limiter = MemoryLimiter::new(&self.config.limits);
         let mut store = Store::new(
             &self.engine,
             HostState {
-                limits,
+                limiter,
+                limits: self.config.limits.clone(),
+                dropped: 0,
                 logs: vec![],
             },
         );
-        store.limiter(|host| &mut host.limits);
+        store.limiter(|host| &mut host.limiter);
         store.set_epoch_deadline(self.config.limits.logic_hard_ms.max(1));
-        let api = pre.instantiate(&mut store).map_err(|e| format!("{e:#}"))?;
+        let api = pre
+            .instantiate(&mut store)
+            .map_err(|e| fault_reason(&e, store.data().limiter.denied))?;
         Ok(Instance { store, api })
     }
     pub fn create(
@@ -286,13 +320,23 @@ impl Runtime {
                 probe
                     .store
                     .set_epoch_deadline(self.config.limits.logic_hard_ms.max(1));
-                let description = probe
+                let start = Instant::now();
+                let result = probe
                     .api
                     .wstouchbar_logic_api()
                     .call_describe(&mut probe.store)
-                    .map(translation::description_from)
-                    .map_err(|e| format!("describe: {e:#}"))?;
-                self.logs.append(&mut probe.store.data_mut().logs);
+                    .map(translation::description_from);
+                self.logs.extend(probe.store.data_mut().take_logs());
+                if start.elapsed() > Duration::from_millis(self.config.limits.logic_soft_ms) {
+                    self.logs
+                        .push(LogRecord::warning("describe exceeded soft deadline"));
+                }
+                let description = result.map_err(|e| {
+                    format!(
+                        "describe: {}",
+                        fault_reason(&e, probe.store.data().limiter.denied)
+                    )
+                })?;
                 if let Some(Ok(module)) =
                     self.modules.get_mut(&(plugin.clone(), revision.to_owned()))
                 {
@@ -322,6 +366,21 @@ impl Runtime {
         invocation: &LogicCall,
     ) -> CallResponse {
         let start = Instant::now();
+        if self.instances.contains_key(&instance)
+            && let Err(error) =
+                touchbar_logic_types::check_call_budget(invocation, &self.config.limits)
+        {
+            self.instances.remove(&instance);
+            return CallResponse {
+                input: Some(Input::LogicFault {
+                    instance,
+                    call,
+                    reason: format!("budget: call: {error}"),
+                }),
+                logs: vec![],
+                duration: start.elapsed(),
+            };
+        }
         let Some(live) = self.instances.get_mut(&instance) else {
             return CallResponse {
                 input: None,
@@ -331,7 +390,7 @@ impl Runtime {
                 duration: start.elapsed(),
             };
         };
-        live.store.data_mut().logs.clear();
+        live.store.data_mut().reset_call();
         live.store
             .set_epoch_deadline(self.config.limits.logic_hard_ms.max(1));
         let ctx = bindings::exports::wstouchbar::logic::api::CallContext { now_ms: now.0 };
@@ -348,15 +407,26 @@ impl Runtime {
                 ctx,
             ),
         };
-        let mut logs = std::mem::take(&mut live.store.data_mut().logs);
+        let mut logs = live.store.data_mut().take_logs();
+        let memory_denied = live.store.data().limiter.denied;
         let input = match result {
             Ok(Ok(wire)) => {
                 let update = translation::update_from(wire);
                 logs.extend(update.warnings.into_iter().map(LogRecord::warning));
-                Input::LogicUpdate {
-                    instance,
-                    call,
-                    update: update.value,
+                match touchbar_logic_types::check_budget(&update.value, &self.config.limits) {
+                    Ok(()) => Input::LogicUpdate {
+                        instance,
+                        call,
+                        update: update.value,
+                    },
+                    Err(error) => {
+                        self.instances.remove(&instance);
+                        Input::LogicFault {
+                            instance,
+                            call,
+                            reason: format!("budget: {error}"),
+                        }
+                    }
                 }
             }
             Ok(Err(message)) => Input::LogicError {
@@ -369,14 +439,20 @@ impl Runtime {
                 Input::LogicFault {
                     instance,
                     call,
-                    reason: format!("{error:#}"),
+                    reason: fault_reason(&error, memory_denied),
                 }
             }
         };
+        let duration = start.elapsed();
+        if duration > Duration::from_millis(self.config.limits.logic_soft_ms) {
+            logs.push(LogRecord::warning(format!(
+                "logic exceeded soft deadline: {duration:?}"
+            )));
+        }
         CallResponse {
             input: Some(input),
             logs,
-            duration: start.elapsed(),
+            duration,
         }
     }
     pub fn dispose(&mut self, instance: InstanceId) {
