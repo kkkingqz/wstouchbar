@@ -22,102 +22,36 @@
 
 ## Контракт (WIT)
 
-Это черновик. Точные типы закрепляются на этапе 2 (см. [15-roadmap.md](15-roadmap.md)), файл — `wit/logic.wit`.
+Окончательный контракт версии 1.0.0 — [wit/logic.wit](../../wit/logic.wit). Биндинги SDK и runtime генерируются непосредственно из него. World `logic` экспортирует интерфейс `wstouchbar:logic/api@1.0.0`; `describe`, `init` и `handle` находятся в этом интерфейсе вместе со всеми типами API. Импортируемая функция `log` использует локальный enum `log-level`; импорт типа enum не даёт гостю дополнительной возможности вызова.
 
-```wit
-package wstouchbar:logic@1.0.0;
+| WIT | Rust |
+|---|---|
+| `scalar`, `scalar-kind` | `Scalar`, `ScalarKind` |
+| `record-value`, `fact-value` | `RecordValue`, `FactValue` |
+| `field-kind`, `field`, `value`, `state-patch` | `FieldKind`, `StateField`, `StateValue`, `StatePatch` |
+| `point`, `rect` | `Point`, `Rect` |
+| `color-role`, `canvas-color`, `rgba` | `ColorRole`, `CanvasColor`; `rgba` — поля варианта `Rgba` |
+| `canvas-paint`, `canvas-linear-gradient`, `text-align` | `CanvasPaint`, `CanvasLinearGradient`, `TextAlign` |
+| `canvas-command` | `CanvasCommand`, все восемь вариантов |
+| `canvas-rect`, `canvas-line`, `canvas-polyline`, `canvas-circle`, `canvas-text`, `canvas-gradient-rect`, `canvas-path`, `canvas-fill-path` | поля соответствующих вариантов `CanvasCommand` |
+| `canvas-path-segment`, `canvas-quadratic-segment`, `canvas-cubic-segment` | `CanvasPathSegment` и поля вариантов `QuadraticTo`, `CubicTo` |
+| `action-kind`, `action-description`, `description` | `ActionKind`, `ActionDescription`, `LogicDescription` |
+| `origin`, `cancel-reason`, `action-event`, `context` | `Origin`, `CancelReason`, `ActionEvent`, `LogicContext` |
+| `call-context` | `CallContext` из `touchbar-logic-types`, `now-ms` — монотонные миллисекунды `Timestamp` |
+| `event` | `LogicEvent` |
+| `effect-done`, `subscription-message`, `subscription-lost` | поля соответствующих вариантов `LogicEvent`, включая тег |
+| `audio-target`, `mute-value`, `bus`, `system-key` | `AudioTarget`, `MuteValue`, `Bus`, `SystemKey` |
+| `dbus-value`, `dbus-call`, `dbus-match`, `dbus-property`, `spawn-spec` | `DbusValue`, `DbusCall`, `DbusMatch`, `DbusProperty`, `SpawnSpec` |
+| `effect`, `audio-volume`, `audio-mute`, `desktop-shortcut` | `Effect` и поля соответствующих вариантов |
+| `lifetime`, `request` | `Lifetime`, `EffectRequest`; `timeout-ms` — `option<u64>`, как в модели |
+| `effect-error`, `spawn-result`, `effect-result`, `effect-outcome` | `EffectError`, `SpawnResult`, `EffectResult`, `EffectOutcome` |
+| `subscription-kind`, `subscription`, `subscription-data` | `SubscriptionKind`, `SubscriptionSpec`, `SubscriptionData` |
+| `audio-state`, `playback-status`, `media-state` | `AudioState`, `PlaybackStatus`, `MediaState` |
+| `placement`, `lifecycle`, `command`, `open-panel` | `Placement`, `PresentationLifecycle`, `PresentationCommand` и поля варианта `Open` |
+| `update` | `LogicUpdate` |
+| `log-level` | уровень журнала SDK/runtime; возможности ядра не расширяет |
 
-interface api {
-    enum scalar-kind { boolean, number, text }
-    variant scalar { boolean(bool), number(f64), text(string) }
-
-    /// Поле состояния. Записи нужны для `repeat`, canvas для `canvas_from`.
-    variant field-kind { scalar(scalar-kind), records(list<tuple<string, scalar-kind>>), canvas }
-    record field { name: string, kind: field-kind, persist: bool }
-
-    type record-value = list<tuple<string, scalar>>;
-    variant value { scalar(scalar), records(list<record-value>), canvas(list<canvas-command>) }
-    type state-patch = list<tuple<string, value>>;
-
-    // canvas-command — перенос из ui WIT исходного проекта (линии, пути, текст, градиенты)
-
-    enum action-kind { pressed, long-pressed, activated, released, cancelled, value-changed, selected }
-    record action-description { kinds: list<action-kind>, value: option<scalar-kind> }
-    record description {
-        actions: list<tuple<string, action-description>>,
-        state: list<field>,
-    }
-
-    enum origin { physical, synthetic }
-    enum cancel-reason { hidden, layer, presentation, profile, layout, mode, revoked, fault, hardware, surface-removed }
-    record action-event {
-        action: string,
-        kind: action-kind,
-        value: option<scalar>,
-        record-key: option<string>,
-        origin: origin,
-        cancel-reason: option<cancel-reason>,
-    }
-
-    record context {
-        surface-kind: string,         // touchbar | window | headless
-        slot-width: f32,              // ширина слота в базовых единицах u
-        representation: string,       // текущий вариант responsive
-        color-scheme: string,         // light | dark
-        accent: option<string>,
-        locale: string,
-    }
-
-    variant event {
-        action(action-event),
-        shown,
-        hidden,
-        context-changed(context),
-        presentation-closed(string),  // id панели, закрытой ядром
-        effect-done(effect-result),
-        subscription-data(subscription-data),
-        subscription-lost(subscription-lost),
-    }
-
-    record call-context { now-ms: u64 }
-
-    // Подробно — в 06-effects.md
-    variant effect { /* audio, media, desktop, key, open-uri, spawn, dbus-call, timer */ }
-    enum lifetime { until-hidden, committed }
-    record request {
-        tag: string,                  // логика сама сопоставляет результат; ID хоста она не видит
-        effect: effect,
-        lifetime: option<lifetime>,   // по умолчанию из каталога действий
-        coalesce: option<string>,     // ключ объединения, выполняется последний запрос
-        timeout-ms: option<u32>,
-    }
-    variant subscription-kind { /* audio-watch, media-watch, desktop-fact, interval, spawn-lines, dbus-signal */ }
-    record subscription { tag: string, kind: subscription-kind, background: bool }
-    // effect-result, subscription-data, subscription-lost — типизированные варианты по видам
-
-    enum placement { anchored, region, full }
-    enum lifecycle { transient, persistent }   // transient — пока держится касание-якорь
-    variant command { open(tuple<string, placement, lifecycle>), close }
-
-    record update {
-        state: state-patch,
-        requests: list<request>,
-        cancel: list<string>,                     // теги запросов
-        subscriptions: option<list<subscription>>, // none = без изменений, some = желаемое множество целиком
-        presentation: option<command>,
-    }
-
-    describe: func() -> description;
-    init: func(config: string, persisted: state-patch, ctx: call-context) -> result<update, string>;
-    handle: func(event: event, ctx: call-context) -> result<update, string>;
-}
-
-world logic {
-    enum log-level { trace, debug, info, warn, error }
-    import log: func(level: log-level, message: string);
-    export api;
-}
-```
+WIT использует списки пар для карт (`record-value`, `spawn-spec.env`). Перевод проверяет повторные ключи: непредставимый элемент отбрасывается с предупреждением, а не молча перезаписывает предыдущее значение (D71). `presentation-closed` и `open-panel.panel` передают `PanelId` строкой с проверкой идентификатора при переводе.
 
 В WIT нет рекурсивных типов. Поэтому значения D-Bus и прочие деревья передаются строкой в фиксированном формате (сигнатура D-Bus и значение в JSON, см. [06-effects.md](06-effects.md)).
 

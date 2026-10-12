@@ -1,0 +1,140 @@
+package wstouchbar:logic@1.0.0;
+
+/// Pure logic API. The host supplies time; the only capability is logging.
+interface api {
+    enum scalar-kind { boolean, number, text }
+    variant scalar { boolean(bool), number(f64), text(string) }
+    type record-value = list<tuple<string, scalar>>;
+    variant fact-value {
+        boolean(bool), number(f64), text(string), %list(list<string>), records(list<record-value>),
+    }
+    variant field-kind { scalar(scalar-kind), records(list<tuple<string, scalar-kind>>), canvas }
+    record field { name: string, kind: field-kind, persist: bool }
+    variant value { scalar(scalar), records(list<record-value>), canvas(list<canvas-command>) }
+    type state-patch = list<tuple<string, value>>;
+
+    record point { x: f32, y: f32 }
+    record rect { x: f32, y: f32, width: f32, height: f32 }
+    enum color-role {
+        background, control, control-pressed, track, foreground, muted,
+        accent, destructive, on-accent, on-destructive,
+    }
+    record rgba { red: f32, green: f32, blue: f32, alpha: f32 }
+    variant canvas-color { role(color-role), rgba(rgba) }
+    record canvas-paint { color: canvas-color, opacity: f32 }
+    record canvas-linear-gradient {
+        start: point, end: point, start-color: canvas-paint, end-color: canvas-paint,
+    }
+    enum text-align { leading, center, trailing }
+    record canvas-rect { rect: rect, radius: f32, paint: canvas-paint }
+    record canvas-line { start: point, end: point, width: f32, paint: canvas-paint }
+    record canvas-polyline { points: list<point>, width: f32, paint: canvas-paint }
+    record canvas-circle { center: point, radius: f32, paint: canvas-paint }
+    record canvas-text { rect: rect, text: string, size: f32, paint: canvas-paint, align: text-align }
+    record canvas-gradient-rect { rect: rect, radius: f32, gradient: canvas-linear-gradient }
+    record canvas-quadratic-segment { control: point, endpoint: point }
+    record canvas-cubic-segment { control-one: point, control-two: point, endpoint: point }
+    variant canvas-path-segment {
+        move-to(point), line-to(point), quadratic-to(canvas-quadratic-segment),
+        cubic-to(canvas-cubic-segment), close,
+    }
+    record canvas-path { segments: list<canvas-path-segment>, width: f32, paint: canvas-paint }
+    record canvas-fill-path { segments: list<canvas-path-segment>, paint: canvas-paint }
+    variant canvas-command {
+        fill-rect(canvas-rect), line(canvas-line), polyline(canvas-polyline),
+        fill-circle(canvas-circle), text(canvas-text),
+        fill-linear-gradient-rect(canvas-gradient-rect), stroke-path(canvas-path), fill-path(canvas-fill-path),
+    }
+
+    enum action-kind { pressed, long-pressed, activated, released, cancelled, value-changed, selected }
+    record action-description { kinds: list<action-kind>, value: option<scalar-kind> }
+    record description { actions: list<tuple<string, action-description>>, state: list<field> }
+    enum origin { physical, synthetic }
+    enum cancel-reason { hidden, layer, presentation, profile, layout, mode, revoked, fault, hardware, surface-removed }
+    record action-event {
+        action: string, kind: action-kind, value: option<scalar>, record-key: option<string>,
+        origin: origin, cancel-reason: option<cancel-reason>,
+    }
+    record context {
+        surface-kind: string, slot-width: f32, representation: string,
+        color-scheme: string, accent: option<string>, locale: string,
+    }
+    record call-context { now-ms: u64 }
+    record effect-done { tag: string, %result: effect-outcome }
+    record subscription-message { tag: string, data: subscription-data }
+    record subscription-lost { tag: string, error: effect-error }
+    variant event {
+        action(action-event), shown, hidden, context-changed(context), presentation-closed(string),
+        effect-done(effect-done), subscription-data(subscription-message), subscription-lost(subscription-lost),
+    }
+
+    enum audio-target { default-sink, default-source }
+    enum mute-value { on, off, toggle }
+    enum bus { session, system }
+    record dbus-value { signature: string, json: string }
+    record dbus-call {
+        bus: bus, destination: string, path: string, %interface: string, method: string, args: dbus-value,
+    }
+    record dbus-match {
+        bus: bus, sender: option<string>, path: option<string>, %interface: option<string>, member: option<string>,
+    }
+    record dbus-property { bus: bus, destination: string, path: string, %interface: string, property: string }
+    record spawn-spec { argv: list<string>, env: list<tuple<string, string>>, stdin: option<string>, max-output: u32 }
+    enum system-key {
+        esc, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+        brightness-down, brightness-up, keyboard-illumination-down, keyboard-illumination-up,
+        previous-song, play-pause, next-song, mute, volume-down, volume-up, microphone-mute, search,
+    }
+    record audio-volume { target: audio-target, level: f64 }
+    record audio-mute { target: audio-target, value: mute-value }
+    record desktop-shortcut { keys: list<string>, app: option<string> }
+    variant effect {
+        audio-set-volume(audio-volume), audio-set-mute(audio-mute),
+        media-play-pause, media-next, media-previous, media-seek(u64),
+        desktop-shortcut(desktop-shortcut), desktop-brightness(f64),
+        desktop-workspace(string), desktop-app-launch(string),
+        key-tap(system-key), key-down(system-key), key-up(system-key),
+        open-uri(string), timer-after(u64), spawn-run(spawn-spec), dbus-call(dbus-call),
+    }
+    enum lifetime { until-hidden, committed }
+    record request {
+        tag: string, effect: effect, lifetime: option<lifetime>,
+        coalesce: option<string>, timeout-ms: option<u64>,
+    }
+    variant effect-error { unsupported, unavailable, failed(string), timeout, cancelled }
+    record spawn-result { status: s32, stdout: string, stderr: string, truncated: bool }
+    variant effect-result { none, mute(bool), spawn(spawn-result), dbus(dbus-value) }
+    type effect-outcome = result<effect-result, effect-error>;
+
+    variant subscription-kind {
+        audio-watch(audio-target), media-watch, desktop-fact(string), timer-interval(u64),
+        spawn-lines(spawn-spec), dbus-signal(dbus-match), dbus-property(dbus-property),
+    }
+    record subscription { tag: string, kind: subscription-kind, background: bool }
+    record audio-state { available: bool, volume: f64, muted: bool, name: string }
+    enum playback-status { playing, paused, stopped }
+    record media-state {
+        player: option<string>, status: playback-status, title: string, artist: string, album: string,
+        art-uri: option<string>, position-ms: u64, length-ms: u64,
+        can-play: bool, can-pause: bool, can-next: bool, can-previous: bool, can-seek: bool,
+    }
+    variant subscription-data { audio(audio-state), media(media-state), fact(option<fact-value>), tick, line(string), dbus(dbus-value) }
+
+    enum placement { anchored, region, full }
+    enum lifecycle { transient, persistent }
+    record open-panel { panel: string, placement: placement, lifecycle: lifecycle }
+    variant command { open(open-panel), close }
+    record update {
+        state: state-patch, requests: list<request>, cancel: list<string>,
+        subscriptions: option<list<subscription>>, presentation: option<command>,
+    }
+    describe: func() -> description;
+    init: func(config: string, persisted: state-patch, ctx: call-context) -> result<update, string>;
+    handle: func(event: event, ctx: call-context) -> result<update, string>;
+}
+
+world logic {
+    enum log-level { trace, debug, info, warn, error }
+    import log: func(level: log-level, message: string);
+    export api;
+}
