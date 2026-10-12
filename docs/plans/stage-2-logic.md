@@ -218,7 +218,7 @@ impl Runtime {
 
 - **Хранилище.** Трейт `PersistStore { load(key) -> StatePatch, write(key, fields) }`, реализации `FsStore` и `MemoryStore`.
 - **`FsStore`.**
-  - **Пути** по D54 и D63: `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/<slot>/<set>.json` и `…/layers/<set>.json`.
+  - **Пути** по D54 и D63: `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/slots/<slot>/<set>.json` и `…/layers/<set>.json`.
   - **Формат** — `{"version": 1, "fields": {...}}` с кодировкой чисел D57.
   - **Запись атомарная:** временный файл, `fsync`, `rename`.
   - **`Output::Persist`** содержит только изменённые поля (05-logic.md), поэтому `write` объединяет их с файлом.

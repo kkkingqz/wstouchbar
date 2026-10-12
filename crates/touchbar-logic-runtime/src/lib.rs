@@ -344,7 +344,9 @@ impl Runtime {
                 }
                 description
             };
-            let persisted = self.persist.read(key).map_err(|e| e.to_string())?;
+            let persisted = self.persist.load(key);
+            self.logs.extend(self.persist.take_logs());
+            let persisted = persisted.map_err(|e| e.to_string())?;
             let live = self.instantiate(&pre)?;
             self.instances.insert(instance, live);
             Ok::<_, String>((description, persisted))
@@ -463,7 +465,14 @@ impl Runtime {
         }
     }
     pub fn persist(&mut self, key: &PersistKey, fields: &StatePatch) -> Result<(), StoreError> {
-        self.persist.write(key, fields)
+        let result = (|| {
+            let current = self.persist.load(key)?;
+            let merged = persist::merged(current, fields);
+            persist::encoded(&merged, self.config.limits.max_persist_bytes)?;
+            self.persist.write(key, fields)
+        })();
+        self.logs.extend(self.persist.take_logs());
+        result
     }
     pub fn take_logs(&mut self) -> Vec<LogRecord> {
         std::mem::take(&mut self.logs)
