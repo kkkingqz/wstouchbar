@@ -243,7 +243,7 @@ impl Instance {
             flight.physical = None;
         }
     }
-    pub fn discard_physical_work(&mut self) {
+    pub fn discard_physical_work(&mut self, active: &BTreeSet<CaptureId>) {
         let physical = |call: &LogicCall| {
             matches!(
                 call,
@@ -253,13 +253,61 @@ impl Instance {
                 }))
             )
         };
-        self.queue.retain(|call| !physical(&call.invocation));
+        let mut abandoned = vec![];
+        let mut seen = BTreeSet::new();
+        for context in self
+            .in_flight
+            .iter()
+            .filter_map(|c| c.physical.as_ref())
+            .chain(self.queue.iter().filter_map(|c| c.physical.as_ref()))
+        {
+            if !active.contains(&context.capture) && seen.insert(context.capture) {
+                abandoned.push(context.clone());
+            }
+        }
+        // An existing hardware cancellation is cleanup, not an old action.
+        self.queue.retain(|call| {
+            !physical(&call.invocation)
+                || matches!(
+                    call.invocation,
+                    LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                        kind: ActionKind::Cancelled,
+                        ..
+                    }))
+                )
+        });
         if let Some(flight) = &mut self.in_flight
             && physical(&flight.invocation)
+            && !matches!(
+                flight.invocation,
+                LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                    kind: ActionKind::Cancelled,
+                    ..
+                }))
+            )
         {
-            // Keep the slot occupied until completion; a preserved instance must
-            // never execute a second wasm call concurrently with the abandoned one.
+            // The abandoned slot stays occupied; its response cannot apply changes.
             flight.discard_update = true;
+            flight.physical = None;
+        }
+        for context in abandoned {
+            if let Some(action) = self
+                .set
+                .all_widgets()
+                .into_iter()
+                .find(|w| w.id == context.target.widget)
+                .and_then(|w| w.handlers.get(&ActionKind::Cancelled))
+                .cloned()
+            {
+                self.enqueue(LogicEvent::Action(ActionEvent {
+                    action,
+                    kind: ActionKind::Cancelled,
+                    value: None,
+                    record_key: context.target.record_key,
+                    origin: Origin::Synthetic,
+                    cancel_reason: Some(CancelReason::Profile),
+                }));
+            }
         }
     }
     pub fn dispatch(&mut self, next_call: &mut u64) -> Option<Output> {

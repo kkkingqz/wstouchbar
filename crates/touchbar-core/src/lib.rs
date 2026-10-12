@@ -684,8 +684,13 @@ impl Core {
         }) {
             return;
         }
+        let active = self.surfaces[&id]
+            .captures
+            .values()
+            .map(|c| c.identity)
+            .collect();
         for instance in self.instances.values_mut().filter(|i| i.surface == id) {
-            instance.discard_physical_work();
+            instance.discard_physical_work(&active);
         }
         self.cancel_surface(id, CancelReason::Profile, output);
         if let Some(surface) = self.surfaces.get_mut(&id) {

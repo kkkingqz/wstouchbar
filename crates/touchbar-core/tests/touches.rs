@@ -817,7 +817,12 @@ fn profile_deadline_discards_physical_work_even_when_instance_is_shared() {
         },
     );
     assert!(c.snapshot().instances[0].state.is_empty());
-    assert!(call(&completed).is_none());
+    assert_eq!(action(&completed).kind, ActionKind::Cancelled);
+    assert_eq!(
+        action(&completed).cancel_reason,
+        Some(CancelReason::Profile)
+    );
+    assert!(call(&ack(&mut c, 1513, &completed)).is_none());
 }
 #[test]
 fn native_teardown_releases_key_capture_and_rejects_new_touches() {

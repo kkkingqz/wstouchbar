@@ -326,3 +326,56 @@ fn pending_expiry_via_fact_must_discard_recent_physical_callback() {
         "expired callback started effect: {out:?}"
     );
 }
+
+#[test]
+fn profile_deadline_delivers_cleanup_for_contacts_already_finished() {
+    for kind in [
+        WidgetKind::Button,
+        WidgetKind::Slider {
+            minimum: 0.0,
+            maximum: 1.0,
+        },
+    ] {
+        for phase in [TouchPhase::Up, TouchPhase::Cancel] {
+            let (mut c, id) = setup(kind.clone(), true);
+            let mut cat = catalog(kind.clone(), true);
+            cat.profiles[1].slots = cat.profiles[0].slots.clone();
+            c.handle(Timestamp(1), Input::Catalog(cat));
+            let pressed = touch(&mut c, 10, 1, TouchPhase::Down, 20.0, 20.0);
+            assert_eq!(action(&pressed).kind, ActionKind::Pressed);
+            c.handle(
+                Timestamp(11),
+                Input::Fact {
+                    name: "app.id".into(),
+                    value: Some(FactValue::Text("other".into())),
+                },
+            );
+            touch(&mut c, 1461, 1, phase, 80.0, 20.0);
+            assert!(c.snapshot().captures.is_empty());
+            c.handle(
+                Timestamp(1511),
+                Input::Fact {
+                    name: "unrelated".into(),
+                    value: Some(FactValue::Boolean(true)),
+                },
+            );
+            assert_eq!(c.snapshot().instances[0].id, id);
+            let cleanup = ack(&mut c, 1512, &pressed);
+            let a = action(&cleanup);
+            assert_eq!(a.kind, ActionKind::Cancelled, "{kind:?}, {phase:?}");
+            assert_eq!(
+                a.cancel_reason,
+                Some(if phase == TouchPhase::Cancel {
+                    CancelReason::Hardware
+                } else {
+                    CancelReason::Profile
+                })
+            );
+            let next = ack(&mut c, 1513, &cleanup);
+            assert!(
+                call(&next).is_none(),
+                "stale work or duplicate cleanup: {next:?}"
+            );
+        }
+    }
+}
