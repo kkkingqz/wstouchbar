@@ -539,3 +539,57 @@ fn condition_false_discards_multitap_progress() {
         vec![fired("test")]
     );
 }
+
+#[test]
+fn foreign_key_between_multitaps_resets_the_series() {
+    let mut e = engine(KeyGesture::MultiTap {
+        count: 2,
+        within_ms: 300,
+        tap_ms: 100,
+    });
+    e.handle(Timestamp(0), key(WatchKey::Fn, KeyPhase::Pressed));
+    e.handle(Timestamp(10), key(WatchKey::Fn, KeyPhase::Released));
+    e.handle(Timestamp(20), key(WatchKey::Esc, KeyPhase::Pressed));
+    e.handle(Timestamp(30), key(WatchKey::Esc, KeyPhase::Released));
+    e = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+    e.handle(Timestamp(40), key(WatchKey::Fn, KeyPhase::Pressed));
+    assert!(
+        e.handle(Timestamp(50), key(WatchKey::Fn, KeyPhase::Released))
+            .is_empty()
+    );
+    e.handle(Timestamp(60), key(WatchKey::Fn, KeyPhase::Pressed));
+    assert_eq!(
+        e.handle(Timestamp(70), key(WatchKey::Fn, KeyPhase::Released)),
+        vec![fired("test")]
+    );
+}
+
+#[test]
+fn foreign_key_between_sequence_steps_resets_progress() {
+    for gesture in [KeyGesture::Press, KeyGesture::Tap { ms: 100 }] {
+        let mut e = sequence(
+            vec![
+                KeyTrigger {
+                    keys: vec![WatchKey::Fn],
+                    gesture: gesture.clone(),
+                },
+                KeyTrigger {
+                    keys: vec![WatchKey::Fn],
+                    gesture,
+                },
+            ],
+            300,
+        );
+        e.handle(Timestamp(0), key(WatchKey::Fn, KeyPhase::Pressed));
+        e.handle(Timestamp(10), key(WatchKey::Fn, KeyPhase::Released));
+        e.handle(Timestamp(20), key(WatchKey::Esc, KeyPhase::Pressed));
+        e.handle(Timestamp(30), key(WatchKey::Esc, KeyPhase::Released));
+        e = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        let down = e.handle(Timestamp(40), key(WatchKey::Fn, KeyPhase::Pressed));
+        let up = e.handle(Timestamp(50), key(WatchKey::Fn, KeyPhase::Released));
+        assert!(down.is_empty() && up.is_empty(), "{down:?}, {up:?}");
+        let mut fresh = e.handle(Timestamp(60), key(WatchKey::Fn, KeyPhase::Pressed));
+        fresh.extend(e.handle(Timestamp(70), key(WatchKey::Fn, KeyPhase::Released)));
+        assert_eq!(fresh, vec![fired("seq")]);
+    }
+}

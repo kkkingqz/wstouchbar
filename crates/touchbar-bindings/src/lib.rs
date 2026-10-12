@@ -89,6 +89,14 @@ impl<A: Clone + PartialEq> BindingEngine<A> {
             if !entry.enabled {
                 continue;
             }
+            if let Trigger::Sequence { steps, .. } = &entry.binding.trigger
+                && entry.progress.step > 0
+                && input.phase == KeyPhase::Pressed
+                && !steps[entry.progress.step].keys.contains(&input.code)
+            {
+                // Reset before processing this key, so it may begin a fresh first step.
+                entry.reset(&mut events);
+            }
             let signals = key_triggers(&entry.binding.trigger)
                 .iter()
                 .zip(&mut entry.gestures)
@@ -257,6 +265,10 @@ impl GestureState {
         let member = trigger.keys.contains(&input.code);
         if input.phase == KeyPhase::Pressed && !member {
             self.interrupted = true;
+            if matches!(trigger.gesture, KeyGesture::MultiTap { .. }) {
+                self.taps = 0;
+                self.window = None;
+            }
         }
         if input.phase == KeyPhase::Pressed
             && member
