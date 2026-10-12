@@ -240,7 +240,8 @@ impl ProfileSwitch {
             .as_ref()
             .map_or(now.after(delay_ms), |p| p.deadline);
         self.pending = Some(PendingProfile { target, deadline });
-        self.expire(now)
+        // The core must cancel captures and discard physical work before expiry.
+        false
     }
     pub fn contacts_finished(&mut self, contacts: usize) -> bool {
         if contacts != 0 {

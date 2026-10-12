@@ -224,6 +224,25 @@ impl Instance {
             .is_some_and(|c| !c.discard_update && physical(&c.invocation))
             || self.queue.iter().any(|c| physical(&c.invocation))
     }
+    pub fn invalidate_capture_context(&mut self, capture: CaptureId) {
+        for queued in &mut self.queue {
+            if queued
+                .physical
+                .as_ref()
+                .is_some_and(|p| p.capture == capture)
+            {
+                queued.physical = None;
+            }
+        }
+        if let Some(flight) = &mut self.in_flight
+            && flight
+                .physical
+                .as_ref()
+                .is_some_and(|p| p.capture == capture)
+        {
+            flight.physical = None;
+        }
+    }
     pub fn discard_physical_work(&mut self) {
         let physical = |call: &LogicCall| {
             matches!(
@@ -378,8 +397,16 @@ impl Instance {
             }
             (InstanceStatus::Visible, false) => {
                 self.status = InstanceStatus::Hidden;
-                self.queue
-                    .retain(|c| !matches!(c.invocation, LogicCall::Handle(LogicEvent::Action(_))));
+                self.queue.retain(|c| {
+                    !matches!(c.invocation, LogicCall::Handle(LogicEvent::Action(_)))
+                        || matches!(
+                            c.invocation,
+                            LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                                kind: ActionKind::Cancelled,
+                                ..
+                            }))
+                        )
+                });
                 self.enqueue(LogicEvent::Hidden);
             }
             _ => {}

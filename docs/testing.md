@@ -86,3 +86,16 @@ PROPTEST_CASES=100000 cargo test -p touchbar-testkit --test properties --release
 ```
 
 Критерии и результаты этапа 1 — [приёмка](validation/stage-1.md).
+
+После итогового ревью добавлены прямые Core-регрессии
+[review_regressions.rs](../crates/touchbar-core/tests/review_regressions.rs):
+Fact точно на deadline Pending до Timer освобождает захват/клавишу и
+отбрасывает поздний физический callback. Сценарий скрытия проверяет порядок
+Pressed → Cancelled → Hidden при занятом слоте вызова. Checker допускает
+отложенный Cancelled на Hidden только если тот уже был в очереди до входа;
+новый Action на Hidden остаётся нарушением I5.
+
+Тесты панели проверяют отменённые очередные и выполняющиеся вызовы,
+сохранение запрета через checkpoint и отсутствие влияния на другое касание.
+Persistent после обычного Up остаётся разрешённым. Harness-сценарий cleanup
+дополнительно проходит проверку инвариантов и JSON replay.

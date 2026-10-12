@@ -590,7 +590,7 @@ impl Core {
                     origin,
                     cancel_reason,
                 }),
-                Some(crate::presentations::PhysicalContext {
+                (kind != ActionKind::Cancelled).then(|| crate::presentations::PhysicalContext {
                     surface: capture.surface,
                     contact: capture.contact,
                     capture: capture.identity,
@@ -658,6 +658,13 @@ impl Core {
         else {
             return;
         };
+        if let Some(instance) = self
+            .instances
+            .get_mut(&capture.target.instance.number)
+            .filter(|i| i.id == capture.target.instance)
+        {
+            instance.invalidate_capture_context(capture.identity);
+        }
         output.push(Output::CaptureFinished {
             capture: capture.snapshot(),
             completion: CaptureCompletion::Cancel(reason),

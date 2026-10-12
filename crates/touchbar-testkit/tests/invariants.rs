@@ -369,3 +369,123 @@ fn checker_detects_fault_mutating_another_instance_and_surface() {
         Invariant::I12
     );
 }
+
+#[test]
+fn checker_accepts_only_prequeued_cleanup_on_hidden_instance() {
+    let h = ready();
+    let mut before = h.snapshot();
+    let id = before.instances[0].id;
+    before.instances[0].status = InstanceStatus::Hidden;
+    let cancelled = LogicCall::Handle(LogicEvent::Action(ActionEvent {
+        action: "microphone".into(),
+        kind: ActionKind::Cancelled,
+        value: None,
+        record_key: None,
+        origin: Origin::Synthetic,
+        cancel_reason: Some(CancelReason::Mode),
+    }));
+    let entry = TraceEntry {
+        at: h.now(),
+        input: Input::Locale("C".into()),
+        outputs: vec![Output::CallLogic {
+            instance: id,
+            call: CallId(999),
+            invocation: cancelled.clone(),
+        }],
+    };
+    // The exception cannot introduce a new action on an already hidden owner.
+    let mut checker = InvariantChecker::new(before.clone());
+    assert_eq!(
+        checker.observe(&entry, &before).unwrap_err().invariant,
+        Invariant::I5
+    );
+    before.instances[0].queue.push(cancelled);
+    before.instances[0].queue_len = 1;
+    let mut after = before.clone();
+    after.instances[0].queue.clear();
+    after.instances[0].queue_len = 0;
+    let mut checker = InvariantChecker::new(before);
+    checker.observe(&entry, &after).unwrap();
+}
+
+#[test]
+fn delayed_cancel_before_hidden_passes_checker_and_replay() {
+    let mut h = Harness::new(CoreConfig::default());
+    h.enable_invariant_checks();
+    let mut cat = fixtures::controls_with_panel();
+    let microphone = &mut cat.sets[0].widgets[1];
+    microphone
+        .handlers
+        .insert(ActionKind::Pressed, "pressed".into());
+    microphone
+        .handlers
+        .insert(ActionKind::Cancelled, "cancelled".into());
+    h.logic.register("controls/main", None, |_, call| {
+        if matches!(
+            call,
+            LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                kind: ActionKind::Pressed,
+                ..
+            }))
+        ) {
+            LogicReaction::Delayed {
+                ms: 10,
+                update: LogicUpdate::default(),
+            }
+        } else {
+            LogicReaction::Update(LogicUpdate::default())
+        }
+    });
+    h.send(Input::Catalog(cat));
+    let mut surface = headless(1);
+    surface.caps.modes = true;
+    h.send(Input::SurfaceAdded(surface));
+    h.send(Input::Mode {
+        surface: SurfaceId(1),
+        mode: Mode::Display,
+    });
+    let start = h.logic.calls.len();
+    h.touch(
+        SurfaceId(1),
+        1,
+        TouchPhase::Down,
+        h.hit(SurfaceId(1), "microphone"),
+    );
+    h.send(Input::Mode {
+        surface: SurfaceId(1),
+        mode: Mode::Native,
+    });
+    assert!(h.snapshot().captures.is_empty());
+    h.advance_ms(10);
+    let calls: Vec<_> = h.logic.calls[start..]
+        .iter()
+        .map(|(_, _, call)| call)
+        .collect();
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(matches!(
+        calls[0],
+        LogicCall::Handle(LogicEvent::Action(ActionEvent {
+            kind: ActionKind::Pressed,
+            ..
+        }))
+    ));
+    assert!(matches!(
+        calls[1],
+        LogicCall::Handle(LogicEvent::Action(ActionEvent {
+            kind: ActionKind::Cancelled,
+            ..
+        }))
+    ));
+    assert!(matches!(calls[2], LogicCall::Handle(LogicEvent::Hidden)));
+    assert!(h.invariant_error.is_none(), "{:?}", h.invariant_error);
+    h.finish_invariant_checks().unwrap();
+    assert_eq!(
+        ReplayDump::from_json(&h.dump().to_json().unwrap())
+            .unwrap()
+            .replay()
+            .unwrap()
+            .core
+            .snapshot(),
+        h.snapshot()
+    );
+}

@@ -511,18 +511,9 @@ impl Core {
                             instance,
                         } => self.hold_contact(surface, contact, instance, timer, &mut output),
                         CoreTimer::Profile { surface } => {
-                            for instance in
-                                self.instances.values_mut().filter(|i| i.surface == surface)
-                            {
-                                instance.discard_physical_work();
-                            }
-                            self.cancel_surface(surface, CancelReason::Profile, &mut output);
-                            if let Some(state) = self.surfaces.get_mut(&surface) {
-                                state.profile_timer = None;
-                                if state.profile.expire(now) {
-                                    self.reconcile_scene(surface, &mut output);
-                                }
-                            }
+                            self.expire_profile(surface, &mut output);
+                            self.sync_profile_timer(surface);
+                            self.reconcile_scene(surface, &mut output);
                         }
                         CoreTimer::InstanceRetry { instance } => {
                             if self.instances.get(&instance.number).is_some_and(|i| {
@@ -679,8 +670,27 @@ impl Core {
             guards,
             self.config.profile_pending_ms,
         );
+        self.expire_profile(id, output);
         self.sync_profile_timer(id);
         self.reconcile_scene(id, output);
+    }
+    fn expire_profile(&mut self, id: SurfaceId, output: &mut Vec<Output>) {
+        if !self.surfaces.get(&id).is_some_and(|surface| {
+            surface
+                .profile
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.deadline <= self.now)
+        }) {
+            return;
+        }
+        for instance in self.instances.values_mut().filter(|i| i.surface == id) {
+            instance.discard_physical_work();
+        }
+        self.cancel_surface(id, CancelReason::Profile, output);
+        if let Some(surface) = self.surfaces.get_mut(&id) {
+            surface.profile.expire(self.now);
+        }
     }
     fn sync_profile_timer(&mut self, id: SurfaceId) {
         let Some(surface) = self.surfaces.get_mut(&id) else {

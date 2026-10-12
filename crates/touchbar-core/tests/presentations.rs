@@ -1179,3 +1179,76 @@ fn built_in_selection_can_replace_panel_before_dismissal() {
         "second"
     );
 }
+
+#[test]
+fn cancelled_physical_callback_cannot_open_persistent_panel() {
+    let (mut c, _, _) = setup();
+    let down = touch(&mut c, 1, 1, TouchPhase::Down, 20.0);
+    touch(&mut c, 2, 1, TouchPhase::Cancel, 20.0);
+    assert!(c.snapshot().captures.is_empty());
+    // Revocation survives a checkpoint, without affecting normal Up semantics.
+    let state = serde_json::to_vec(&c.checkpoint()).unwrap();
+    c = Core::restore(serde_json::from_slice(&state).unwrap()).unwrap();
+    let cancelled = reply(
+        &mut c,
+        3,
+        &down,
+        open("first", Placement::Full, PresentationLifecycle::Persistent),
+    );
+    assert!(
+        c.snapshot().surfaces[0].presentation.is_none(),
+        "cancelled press opened a panel"
+    );
+    reply(
+        &mut c,
+        4,
+        &cancelled,
+        open("first", Placement::Full, PresentationLifecycle::Persistent),
+    );
+    assert!(
+        c.snapshot().surfaces[0].presentation.is_none(),
+        "cancel callback opened a panel"
+    );
+}
+
+#[test]
+fn cancelled_queued_physical_callback_cannot_open_persistent_panel() {
+    let (mut c, _, _) = setup();
+    let first = touch(&mut c, 1, 1, TouchPhase::Down, 20.0);
+    touch(&mut c, 2, 2, TouchPhase::Down, 20.0);
+    touch(&mut c, 3, 2, TouchPhase::Cancel, 20.0);
+    let second = reply(&mut c, 4, &first, None);
+    assert!(matches!(
+        call(&second),
+        Some((
+            _,
+            _,
+            LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                kind: ActionKind::Pressed,
+                ..
+            }))
+        ))
+    ));
+    reply(
+        &mut c,
+        5,
+        &second,
+        open("first", Placement::Full, PresentationLifecycle::Persistent),
+    );
+    assert!(c.snapshot().surfaces[0].presentation.is_none());
+}
+
+#[test]
+fn cancelling_other_contact_preserves_live_callback_panel_permission() {
+    let (mut c, _, _) = setup();
+    let first = touch(&mut c, 1, 1, TouchPhase::Down, 20.0);
+    touch(&mut c, 2, 2, TouchPhase::Down, 20.0);
+    touch(&mut c, 3, 2, TouchPhase::Cancel, 20.0);
+    reply(
+        &mut c,
+        4,
+        &first,
+        open("first", Placement::Full, PresentationLifecycle::Persistent),
+    );
+    assert!(c.snapshot().surfaces[0].presentation.is_some());
+}

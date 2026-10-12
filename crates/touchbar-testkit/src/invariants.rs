@@ -410,7 +410,16 @@ impl InvariantChecker {
                     if matches!(invocation, LogicCall::Handle(LogicEvent::Action(_))) {
                         require!(
                             current.is_some_and(|i| i.status == InstanceStatus::Visible)
-                                || cleanup && was_visible,
+                                || cleanup && was_visible
+                                || matches!(
+                                    invocation,
+                                    LogicCall::Handle(LogicEvent::Action(ActionEvent {
+                                        kind: ActionKind::Cancelled,
+                                        ..
+                                    }))
+                                ) && current.is_some_and(|i| i.status == InstanceStatus::Hidden)
+                                    && prior.is_some_and(|i| i.queue.contains(invocation))
+                                    && !disposed.contains(id),
                             I5,
                             "action delivered to hidden instance"
                         );
