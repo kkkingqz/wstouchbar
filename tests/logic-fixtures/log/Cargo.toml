@@ -1,0 +1,23 @@
+[package]
+name = "touchbar-fixture-log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+touchbar-logic-sdk.workspace = true
+
+# Generated ABI bindings may allow unsafe locally; ordinary code stays denied.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+disallowed_types = "deny"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+match_same_arms = "warn"
