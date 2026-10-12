@@ -3,6 +3,7 @@ use touchbar_model::*;
 pub struct Echo;
 impl Logic for Echo {
     fn describe() -> LogicDescription {
+        touchbar_logic_sdk::log::info!("echo.describe");
         Description::new()
             .field("last", FieldKind::Scalar(ScalarKind::Text), false)
             .build()

@@ -1338,11 +1338,15 @@ dependencies = [
 name = "touchbar-logic-runtime"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "touchbar-core",
  "touchbar-logic-types",
  "touchbar-model",
+ "touchbar-testkit",
+ "touchbar-wasm-fixtures",
  "wasmtime",
 ]
 

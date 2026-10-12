@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 touchbar-model.workspace = true
+touchbar-core.workspace = true
 touchbar-logic-types.workspace = true
 wasmtime.workspace = true
 serde.workspace = true
@@ -23,3 +24,8 @@ disallowed_types = "deny"
 cast_possible_truncation = "warn"
 cast_sign_loss = "warn"
 match_same_arms = "warn"
+
+[dev-dependencies]
+touchbar-wasm-fixtures.workspace = true
+touchbar-testkit = { path = "../touchbar-testkit" }
+proptest.workspace = true

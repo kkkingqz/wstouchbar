@@ -161,7 +161,7 @@ touchbar_logic_sdk::export!(Controls);
 impl Runtime {
     pub fn new(config: RuntimeConfig, store: Box<dyn PersistStore>) -> Result<Self, RuntimeError>;
     pub fn load_module(&mut self, plugin: PluginId, revision: &str, bytes: &[u8]) -> Result<(), LoadError>;
-    pub fn create(&mut self, now: Timestamp, instance: InstanceId, plugin: &PluginId,
+    pub fn create(&mut self, now: Timestamp, instance: InstanceId, plugin: &PluginId, revision: &str,
                   set: &SetRef, persist_key: &PersistKey) -> Input;      // LogicDescribed | InstanceFault
     pub fn call(&mut self, now: Timestamp, instance: InstanceId, call: CallId,
                 invocation: &LogicCall) -> CallResponse;                  // Input + журнал + длительность
@@ -180,7 +180,7 @@ impl Runtime {
   - небольшой `memory_reservation`, чтобы много экземпляров не занимали адресное пространство;
   - кеш по уточнению 5.
 - **Модули.**
-  - **Компиляция и проверка.** `load_module` компилирует модуль, требует точное имя экспорта `wstouchbar:logic/api@1.0.0`, сверяет типы интерфейса с биндингами v1 и проверяет импорты (уточнение 4). Модуль хранится по `(plugin, revision)`.
+  - **Компиляция и проверка.** `load_module` компилирует модуль, требует точное имя экспорта `wstouchbar:logic/api@1.0.0`, сверяет типы интерфейса с биндингами v1 и проверяет импорты (уточнение 4). Модуль хранится по `(plugin, revision)`. Загрузка лишь кеширует его; `create` получает ревизию из принятого каталога (D73), поэтому неудачная перезагрузка не активирует новую логику.
   - **Новая ревизия.** Существующие экземпляры держат прежний компонент до уничтожения.
   - **`describe`** вызывается один раз на модуль, результат кешируется.
 - **Экземпляры.**
@@ -190,7 +190,7 @@ impl Runtime {
 - **Вызовы.**
   - **Перевод.** `call` переводит `LogicCall` в `init` или `handle`, а ответ — в `LogicUpdate`, `LogicError` или `LogicFault` с исходным `CallId`.
   - **Журнал гостя** возвращается данными в `CallResponse`, отправку в journald делает оболочка на этапе 3.
-- **Поток.** Вызовы синхронные, в потоке вызывающего (05-logic.md). Единственный дополнительный поток — тикер epoch.
+- **Поток.** Вызовы синхронные, в потоке вызывающего (05-logic.md). Служебные потоки — тикер epoch и внутренний работник встроенного кеша Wasmtime (D74). Они не выполняют вызовы логики.
 
 Тесты:
 - property `echo`: случайные `LogicUpdate` и `LogicEvent` из стратегий testkit проходят хост → гость → хост без изменений, NaN как в L2. 2000 случаев, в длинном прогоне 10⁵;
