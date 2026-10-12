@@ -1,7 +1,7 @@
 {
-  "format_version": 3,
+  "format_version": 4,
   "checkpoint": {
-    "format_version": 2,
+    "format_version": 3,
     "core": {
       "config": {
         "max_surfaces": 8,
@@ -395,7 +395,10 @@
               "plugin": "controls",
               "surface": "touchbar",
               "scope": {
-                "ProfileSlot": "main"
+                "ProfileSlot": {
+                  "slot": "main",
+                  "set": "controls/main"
+                }
               }
             }
           }
@@ -623,7 +626,10 @@
               "plugin": "controls",
               "surface": "window:test2",
               "scope": {
-                "ProfileSlot": "main"
+                "ProfileSlot": {
+                  "slot": "main",
+                  "set": "controls/main"
+                }
               }
             }
           }
@@ -2729,7 +2735,10 @@
               "plugin": "controls",
               "surface": "window:test2",
               "scope": {
-                "ProfileSlot": "main"
+                "ProfileSlot": {
+                  "slot": "main",
+                  "set": "controls/alternate"
+                }
               }
             }
           }

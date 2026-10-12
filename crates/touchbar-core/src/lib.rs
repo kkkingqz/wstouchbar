@@ -773,7 +773,10 @@ impl Core {
                     scope: if matches!(item.plane, ScenePlane::Layer(_)) {
                         PersistScope::Layer(set.reference.clone())
                     } else {
-                        PersistScope::ProfileSlot(slot.clone())
+                        PersistScope::ProfileSlot {
+                            slot: slot.clone(),
+                            set: set.reference.clone(),
+                        }
                     },
                 };
                 let logic = Instance::new(

@@ -11,7 +11,7 @@ pub struct PersistKey {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PersistScope {
-    ProfileSlot(SlotId),
+    ProfileSlot { slot: SlotId, set: SetRef },
     Layer(SetRef),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

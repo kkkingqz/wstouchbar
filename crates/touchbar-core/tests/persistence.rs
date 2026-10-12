@@ -258,7 +258,10 @@ fn set_owner_and_surface_name_scope_profile_and_layer_independently() {
     assert_eq!(key.plugin, "p".parse().unwrap());
     assert_eq!(
         key.scope,
-        PersistScope::ProfileSlot("main".parse().unwrap())
+        PersistScope::ProfileSlot {
+            slot: "main".parse().unwrap(),
+            set: "p/main".parse().unwrap()
+        }
     );
     let out = c.handle(
         Timestamp(1),
@@ -395,4 +398,65 @@ fn loaded_bytes_limit_and_duplicate_names_are_enforced() {
         ],
     );
     assert!(out.iter().any(|o|matches!(o,Output::CallLogic {invocation:LogicCall::Init {persisted,..},..} if persisted==&vec![("level".into(),number(2.0))])));
+}
+
+#[test]
+fn different_sets_in_same_profile_slot_never_share_persisted_fields() {
+    let (mut c, volume, volume_key) = setup(CoreConfig::default());
+    describe(&mut c, volume, 0, vec![]);
+    reply(&mut c, volume, 0, vec![("level".into(), number(7.0))]);
+    reply(&mut c, volume, 0, vec![]);
+    let mut cat = catalog();
+    let mut brightness = cat.sets[0].clone();
+    brightness.reference = "p/brightness".parse().unwrap();
+    cat.sets.push(brightness);
+    let mut browser = ProfileSpec::default_for("p/browser".parse().unwrap());
+    browser.for_target = Some(ProfileTarget::App("browser".into()));
+    browser.slots.push(SlotSpec {
+        id: "main".parse().unwrap(),
+        candidates: vec!["p/brightness".parse().unwrap()],
+    });
+    cat.profiles.push(browser);
+    c.handle(Timestamp(1), Input::Catalog(cat));
+    let out = c.handle(
+        Timestamp(2),
+        Input::Fact {
+            name: "app.id".into(),
+            value: Some(FactValue::Text("browser".into())),
+        },
+    );
+    let brightness_key = out
+        .iter()
+        .find_map(|o| match o {
+            Output::CreateInstance { persist_key, .. } => Some(persist_key),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(&volume_key, brightness_key);
+    let brightness = c.snapshot().instances[0].id;
+    let init = describe(&mut c, brightness, 2, vec![]);
+    assert!(
+        init.iter().any(|o| matches!(o, Output::CallLogic {
+        invocation: LogicCall::Init { persisted, .. }, ..
+    } if persisted.is_empty())),
+        "{init:?}"
+    );
+    reply(&mut c, brightness, 2, vec![("level".into(), number(0.25))]);
+    reply(&mut c, brightness, 2, vec![]);
+    c = Core::restore(c.checkpoint()).unwrap();
+    c.handle(
+        Timestamp(3),
+        Input::Fact {
+            name: "app.id".into(),
+            value: None,
+        },
+    );
+    let volume = c.snapshot().instances[0].id;
+    let init = describe(&mut c, volume, 3, vec![]);
+    assert!(
+        init.iter().any(|o| matches!(o, Output::CallLogic {
+        invocation: LogicCall::Init { persisted, .. }, ..
+    } if persisted == &vec![("level".into(), number(7.0))])),
+        "{init:?}"
+    );
 }

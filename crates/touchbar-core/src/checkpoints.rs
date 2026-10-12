@@ -1,7 +1,7 @@
 use crate::*;
 
 /// Version of the complete continuation state, independent of the status view.
-pub const CORE_STATE_VERSION: u32 = 2;
+pub const CORE_STATE_VERSION: u32 = 3;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoreState {
     pub format_version: u32,

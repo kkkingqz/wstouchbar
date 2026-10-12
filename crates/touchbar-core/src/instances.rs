@@ -779,7 +779,10 @@ mod tests {
             PersistKey {
                 plugin: "p".parse().unwrap(),
                 surface: "headless:1".parse().unwrap(),
-                scope: crate::PersistScope::ProfileSlot("main".parse().unwrap()),
+                scope: crate::PersistScope::ProfileSlot {
+                    slot: "main".parse().unwrap(),
+                    set: "p/slider".parse().unwrap(),
+                },
             },
         );
         let config = CoreConfig::default();

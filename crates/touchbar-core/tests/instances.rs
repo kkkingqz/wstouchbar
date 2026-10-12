@@ -316,7 +316,10 @@ fn load_failure_before_describe_uses_backoff_and_stale_instance_fault_is_ignored
         persist_key: PersistKey {
             plugin: "p".parse().unwrap(),
             surface: "headless:1".parse().unwrap(),
-            scope: PersistScope::ProfileSlot("main".parse().unwrap())
+            scope: PersistScope::ProfileSlot {
+                slot: "main".parse().unwrap(),
+                set: "p/button".parse().unwrap()
+            }
         },
         instance: new,
         surface: SurfaceId(1),
