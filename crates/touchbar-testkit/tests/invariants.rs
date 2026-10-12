@@ -316,6 +316,187 @@ fn checker_detects_missing_release_and_dead_lease_owner() {
     );
 }
 #[test]
+fn checker_accepts_fault_with_preexisting_pending_profile_completion() {
+    let dump = ReplayDump::from_json(include_str!(
+        "regressions/fault_during_pending_completion.replay.json"
+    ))
+    .unwrap();
+    let mut core = Core::restore(dump.checkpoint).unwrap();
+    let mut checker = InvariantChecker::new(core.snapshot());
+    for entry in dump.inputs {
+        if matches!(entry.input, Input::LogicFault { .. }) {
+            let before = core.snapshot();
+            let pending = &before
+                .surfaces
+                .iter()
+                .find(|s| s.info.id == SurfaceId(2))
+                .unwrap()
+                .profile;
+            assert_eq!(pending.active, Some("controls/default".parse().unwrap()));
+            assert_eq!(
+                pending.pending.as_ref().unwrap().target,
+                Some("controls/app1".parse().unwrap())
+            );
+            let old = before
+                .instances
+                .iter()
+                .find(|i| i.surface == SurfaceId(2))
+                .unwrap()
+                .id;
+            let mut neutral = core.clone();
+            neutral.handle(entry.at, Input::Locale("test-0".into()));
+            assert_eq!(core.handle(entry.at, entry.input.clone()), entry.outputs);
+            for snapshot in [core.snapshot(), neutral.snapshot()] {
+                assert!(!snapshot.instances.iter().any(|i| i.id == old));
+                let profile = &snapshot
+                    .surfaces
+                    .iter()
+                    .find(|s| s.info.id == SurfaceId(2))
+                    .unwrap()
+                    .profile;
+                assert_eq!(profile.active, Some("controls/app1".parse().unwrap()));
+                assert!(profile.pending.is_none());
+            }
+            checker.observe(&entry, &core.snapshot()).unwrap();
+            return;
+        }
+        assert_eq!(core.handle(entry.at, entry.input.clone()), entry.outputs);
+        checker.observe(&entry, &core.snapshot()).unwrap();
+    }
+    panic!("fixture must contain a fault");
+}
+
+#[test]
+fn checker_rejects_live_instance_mutations_during_pending_completion() {
+    let mut h = ready();
+    h.send(Input::SurfaceAdded(headless(2)));
+    let mut before = h.snapshot();
+    let first = before.instances[0].id;
+    let other = before
+        .instances
+        .iter()
+        .find(|i| i.surface == SurfaceId(2))
+        .unwrap()
+        .id;
+    let target: ProfileRef = "controls/next".parse().unwrap();
+    before.surfaces[1].profile.pending = Some(PendingProfile {
+        target: Some(target.clone()),
+        deadline: before.now.after(1500),
+    });
+    let mut completed = before.clone();
+    completed.surfaces[1].profile.active = Some(target.clone());
+    completed.surfaces[1].profile.pending = None;
+    completed.surfaces[1].scene.profile = Some(target);
+    for change_state in [false, true] {
+        let mut after = completed.clone();
+        let instance = after.instances.iter_mut().find(|i| i.id == other).unwrap();
+        if change_state {
+            instance.state.push((
+                "fabricated".into(),
+                StateValue::Scalar(Scalar::Boolean(true)),
+            ));
+        } else {
+            instance.status = InstanceStatus::Hidden;
+        }
+        let mut checker = InvariantChecker::new(before.clone());
+        assert_eq!(
+            checker
+                .observe(
+                    &fabricated(
+                        &h,
+                        Input::InstanceFault {
+                            instance: first,
+                            reason: "trap".into(),
+                        }
+                    ),
+                    &after
+                )
+                .unwrap_err()
+                .invariant,
+            Invariant::I10
+        );
+    }
+}
+
+#[test]
+fn checker_rejects_unjustified_removal_during_pending_completion() {
+    let dump = ReplayDump::from_json(include_str!(
+        "regressions/fault_during_pending_completion.replay.json"
+    ))
+    .unwrap();
+    let mut core = Core::restore(dump.checkpoint).unwrap();
+    let entry = dump
+        .inputs
+        .into_iter()
+        .find(|entry| {
+            if matches!(entry.input, Input::LogicFault { .. }) {
+                true
+            } else {
+                assert_eq!(core.handle(entry.at, entry.input.clone()), entry.outputs);
+                false
+            }
+        })
+        .unwrap();
+    let before = core.snapshot();
+    assert_eq!(core.handle(entry.at, entry.input.clone()), entry.outputs);
+    let after = core.snapshot();
+    let old = before
+        .instances
+        .iter()
+        .find(|i| i.surface == SurfaceId(2))
+        .unwrap();
+    for invalid in [
+        "no pending",
+        "unresolved",
+        "wrong target",
+        "no dispose",
+        "layer",
+        "retained placement",
+    ] {
+        let mut before = before.clone();
+        let mut after = after.clone();
+        let mut entry = entry.clone();
+        match invalid {
+            "no pending" => before.surfaces[1].profile.pending = None,
+            "unresolved" => {
+                after.surfaces[1].profile.pending = before.surfaces[1].profile.pending.clone()
+            }
+            "wrong target" => before.surfaces[1].profile.pending.as_mut().unwrap().target = None,
+            "no dispose" => entry.outputs.retain(
+                |o| !matches!(o, Output::DisposeInstance { instance } if *instance == old.id),
+            ),
+            "layer" => {
+                before
+                    .instances
+                    .iter_mut()
+                    .find(|i| i.id == old.id)
+                    .unwrap()
+                    .persist_key
+                    .scope = PersistScope::Layer(old.set.clone())
+            }
+            "retained placement" => {
+                let mut item = before.surfaces[1]
+                    .scene
+                    .items
+                    .iter()
+                    .find(|i| i.instance == old.id)
+                    .unwrap()
+                    .clone();
+                item.instance = after.surfaces[1].scene.items[0].instance;
+                after.surfaces[1].scene.items[0] = item;
+            }
+            _ => unreachable!(),
+        }
+        let mut checker = InvariantChecker::new(before);
+        assert_eq!(
+            checker.observe(&entry, &after).unwrap_err().invariant,
+            Invariant::I10,
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
 fn checker_detects_fault_mutating_another_instance_and_surface() {
     let mut h = ready();
     h.send(Input::SurfaceAdded(headless(2)));

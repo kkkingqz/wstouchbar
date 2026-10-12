@@ -216,12 +216,72 @@ impl Core {
         }
     }
     pub fn handle(&mut self, now: Timestamp, input: Input) -> Vec<Output> {
-        let mut output = vec![];
+        match input {
+            Input::Touch {
+                surface,
+                contact,
+                phase: TouchPhase::Move,
+                x,
+                y,
+            } if !self.surfaces.values().any(|s| s.profile.pending.is_some())
+                && !self.timers.has_due(now) =>
+            {
+                self.handle_move(now, surface, contact, Point { x, y })
+            }
+            other => self.handle_full(now, other),
+        }
+    }
+    fn accept_timestamp(&mut self, now: Timestamp, output: &mut Vec<Output>) -> bool {
         if now < self.now {
-            warn(&mut output, "timestamp moved backwards");
-            return output;
+            warn(output, "timestamp moved backwards");
+            return false;
         }
         self.now = now;
+        true
+    }
+    fn handle_move(
+        &mut self,
+        now: Timestamp,
+        surface: SurfaceId,
+        contact: ContactId,
+        point: Point,
+    ) -> Vec<Output> {
+        let mut output = vec![];
+        if !self.accept_timestamp(now, &mut output) {
+            return output;
+        }
+        let owner = self
+            .surfaces
+            .get(&surface)
+            .and_then(|s| s.captures.get(&contact))
+            .map(|c| c.target.instance);
+        self.touch(surface, contact, TouchPhase::Move, point, &mut output);
+        // Motion can change interaction data and queue an Action only for this owner.
+        // It cannot change profiles, lifecycles, state fields, effects or subscriptions.
+        if let Some(owner) = owner
+            && let Some(instance) = self
+                .instances
+                .get_mut(&owner.number)
+                .filter(|i| i.id == owner)
+        {
+            if let Some(state) = self.surfaces.get_mut(&surface)
+                && let Some(item) = state.scene.items.iter_mut().find(|i| i.instance == owner)
+                && item.interactions != instance.interactions
+            {
+                item.interactions = instance.interactions.clone();
+                state.dirty = true;
+            }
+            output.extend(instance.dispatch(&mut self.next_call));
+        }
+        self.render(surface, &mut output);
+        output.extend(self.timers.notify().into_iter().map(Output::from));
+        output
+    }
+    fn handle_full(&mut self, now: Timestamp, input: Input) -> Vec<Output> {
+        let mut output = vec![];
+        if !self.accept_timestamp(now, &mut output) {
+            return output;
+        }
         match input {
             Input::Locale(locale) => {
                 if locale.is_empty()
@@ -1106,3 +1166,6 @@ mod profile_timer_tests {
         assert!(core.timers.notify().is_empty());
     }
 }
+
+#[cfg(test)]
+mod move_tests;

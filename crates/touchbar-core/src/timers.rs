@@ -27,6 +27,9 @@ impl<T> Default for TimerRegistry<T> {
     }
 }
 impl<T> TimerRegistry<T> {
+    pub(crate) fn has_due(&self, now: Timestamp) -> bool {
+        self.advertised.is_some_and(|(_, at)| at <= now)
+    }
     pub fn deadline(&self, id: TimerId) -> Option<Timestamp> {
         self.entries.get(&id).map(|job| job.at)
     }

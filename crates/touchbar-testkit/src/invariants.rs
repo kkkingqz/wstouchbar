@@ -53,6 +53,49 @@ fn instance(snapshot: &CoreSnapshot, id: InstanceId) -> Option<&InstanceSnapshot
 fn surface(snapshot: &CoreSnapshot, id: SurfaceId) -> Option<&SurfaceSnapshot> {
     snapshot.surfaces.iter().find(|s| s.info.id == id)
 }
+fn removed_by_pending_profile(
+    before: &CoreSnapshot,
+    after: &CoreSnapshot,
+    entry: &TraceEntry,
+    old: &InstanceSnapshot,
+) -> bool {
+    let Some(previous) = surface(before, old.surface) else {
+        return false;
+    };
+    let Some(pending) = &previous.profile.pending else {
+        return false;
+    };
+    let Some(current) = surface(after, old.surface) else {
+        return false;
+    };
+    if current.profile.pending.is_some()
+        || current.profile.active != pending.target
+        || current.profile.active == previous.profile.active
+        || current.scene.profile != current.profile.active
+        || !matches!(old.persist_key.scope, PersistScope::ProfileSlot { .. })
+    {
+        return false;
+    }
+    let Some(item) = previous
+        .scene
+        .items
+        .iter()
+        .find(|i| i.instance == old.id && i.plane == ScenePlane::Profile)
+    else {
+        return false;
+    };
+    // A retained placement must keep its instance, even during a profile transition.
+    !current.scene.items.iter().any(|i| {
+        i.instance == old.id
+            || i.plane == ScenePlane::Profile
+                && i.slot == item.slot
+                && i.set.reference == item.set.reference
+                && i.set.logic_config == item.set.logic_config
+    }) && entry
+        .outputs
+        .iter()
+        .any(|o| matches!(o, Output::DisposeInstance { instance } if *instance == old.id))
+}
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InvariantCoverage {
     pub inputs: usize,
@@ -549,8 +592,10 @@ impl InvariantChecker {
                     continue;
                 }
                 require!(
-                    instance(after, old.id)
-                        .is_some_and(|i| i.state == old.state && i.status == old.status),
+                    instance(after, old.id).map_or_else(
+                        || removed_by_pending_profile(&self.before, after, entry, old),
+                        |i| i.state == old.state && i.status == old.status
+                    ),
                     I10,
                     "fault changed another instance"
                 );
