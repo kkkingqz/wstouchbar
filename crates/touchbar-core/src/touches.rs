@@ -82,6 +82,10 @@ impl Core {
                 .insert(contact, capture);
             return;
         }
+        let previous_panel = self.surfaces[&surface]
+            .presentation
+            .as_ref()
+            .map(|p| p.scene.id);
         output.push(Output::CaptureFinished {
             capture: capture.snapshot(),
             completion: CaptureCompletion::Up,
@@ -137,7 +141,15 @@ impl Core {
             _ => {}
         }
         self.set_pressed(&capture, false);
-        self.anchor_finished(surface, capture.identity, output);
+        // Release closes the panel that existed before Up, never one opened by Up.
+        if self.surfaces[&surface]
+            .presentation
+            .as_ref()
+            .map(|p| p.scene.id)
+            == previous_panel
+        {
+            self.anchor_finished(surface, capture.identity, output);
+        }
     }
     fn touch_down(
         &mut self,

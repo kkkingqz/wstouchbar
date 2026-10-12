@@ -1252,3 +1252,39 @@ fn cancelling_other_contact_preserves_live_callback_panel_permission() {
     );
     assert!(c.snapshot().surfaces[0].presentation.is_some());
 }
+
+#[test]
+fn expanded_panel_survives_the_release_that_opens_it() {
+    let mut cat = catalog();
+    cat.sets[0].logic = None;
+    cat.sets[0].widgets[0].handlers.clear();
+    cat.sets[0].widgets[0].expanded_panel = Some("second".parse().unwrap());
+    cat.sets[0].panels.remove(0);
+    cat.sets[0].panels[0].dismissal.release = true;
+    let mut c = Core::new(CoreConfig::default());
+    c.handle(Timestamp(0), Input::Catalog(cat));
+    c.handle(Timestamp(0), Input::SurfaceAdded(info(1)));
+    let id = c.snapshot().instances[0].id;
+    layout(
+        &mut c,
+        0,
+        1,
+        vec![hit(
+            id,
+            "source",
+            ScenePlane::Profile,
+            rect(10.0, 10.0, 100.0, 20.0),
+        )],
+        None,
+    );
+    touch(&mut c, 1, 1, TouchPhase::Down, 20.0);
+    touch(&mut c, 2, 1, TouchPhase::Up, 20.0);
+    let panel = c.snapshot().surfaces[0]
+        .scene
+        .presentation
+        .clone()
+        .expect("expanded panel");
+    assert_eq!(panel.panel.id, "second".parse().unwrap());
+    assert_eq!(panel.lifecycle, PresentationLifecycle::Persistent);
+    assert!(c.snapshot().captures.is_empty());
+}
