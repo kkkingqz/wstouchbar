@@ -123,7 +123,15 @@ pub(crate) fn compose(
                 .find(|i| i.instance == instance)
                 .map_or_else(Vec::new, |i| i.interactions.clone()),
             plane,
-            units: UnitSize::resolve(surface, set.units, profile.and_then(|p| p.units)),
+            units: UnitSize::resolve(
+                surface,
+                set.units,
+                if plane == ScenePlane::Profile {
+                    profile.and_then(|p| p.units)
+                } else {
+                    None
+                },
+            ),
             status: previous
                 .items
                 .iter()

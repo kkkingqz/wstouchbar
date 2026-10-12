@@ -302,3 +302,74 @@ fn profile_reconciliation_coalesces_render_until_frame_done() {
     );
     assert!(out.iter().any(|o| matches!(o, Output::Render {scene, ..} if scene.profile.as_ref().unwrap().to_string() == "profiles/app")));
 }
+
+#[test]
+fn layer_units_are_independent_of_the_active_profile() {
+    for explicit in [
+        None,
+        Some(UnitSize {
+            value: 3.0,
+            axis: Axis::Width,
+        }),
+    ] {
+        let mut cat = catalog();
+        cat.profiles[0].units = Some(UnitSize {
+            value: 2.0,
+            axis: Axis::Width,
+        });
+        cat.profiles[1].units = Some(UnitSize {
+            value: 4.0,
+            axis: Axis::Width,
+        });
+        cat.sets[2].units = explicit;
+        cat.bindings.push(Binding {
+            id: "layer".into(),
+            when: None,
+            trigger: Trigger::Key(KeyTrigger {
+                keys: vec![WatchKey::Fn],
+                gesture: KeyGesture::WhileHeld,
+            }),
+            action: LayerAction {
+                operation: LayerOperation::Layer("controls/static".parse().unwrap()),
+                surfaces: LayerSurfaces::Source,
+            },
+        });
+        let mut c = core(cat);
+        c.handle(
+            Timestamp(1),
+            Input::Key {
+                source: KeySource::Desktop,
+                code: WatchKey::Fn,
+                phase: KeyPhase::Pressed,
+            },
+        );
+        let before = scene(&c, 1)
+            .items
+            .into_iter()
+            .find(|i| matches!(i.plane, ScenePlane::Layer(_)))
+            .unwrap();
+        let expected = explicit.unwrap_or(UnitSize {
+            value: 1.0,
+            axis: Axis::Height,
+        });
+        assert_eq!(before.units, expected);
+        c.handle(
+            Timestamp(2),
+            Input::Fact {
+                name: "app.id".into(),
+                value: Some(FactValue::Text("editor".into())),
+            },
+        );
+        let after = scene(&c, 1)
+            .items
+            .into_iter()
+            .find(|i| matches!(i.plane, ScenePlane::Layer(_)))
+            .unwrap();
+        assert_eq!(after.instance, before.instance);
+        assert_eq!(after.units, before.units);
+        assert_eq!(
+            Length::Unit(2.0).to_px(&info(1), after.units),
+            Length::Unit(2.0).to_px(&info(1), before.units)
+        );
+    }
+}
