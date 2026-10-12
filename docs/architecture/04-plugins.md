@@ -43,7 +43,7 @@ file = "sets/brightness.toml"
 
 ## Наборы
 
-Формат переносится из `touchbar-set-config` исходного проекта, валидация становится строже (A11: `canvas` требует `canvas_from`). Узлы раскладки:
+Формат переносится из `touchbar-set-config` исходного проекта, валидация становится строже (A11: `canvas` требует `canvas_from`). Манифест и наборы разбирает `touchbar-sets`: схема целиком, проверки и преобразование в `SetSpec` для ядра. Атрибуты раскладки в `SetSpec` не попадают, их читает рендер (D66). Узлы раскладки:
 - контейнеры: `row`, `column`, `stack`, `responsive` (варианты по ширине), `repeat` (по записям состояния);
 - элементы: `button`, `text`, `icon`, `image`, `slider`, `meter`, `progress`, `scrubber`, `canvas`, `shader-effect`;
 - промежутки: `fixed-space`, `flexible-space`;

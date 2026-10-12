@@ -6,8 +6,8 @@
 |---|---|---|
 | **0. Документ** | эта архитектура, список паритета, открытые вопросы | документ согласован |
 | **1. Ядро** | `touchbar-core`, `touchbar-bindings`, `touchbar-testkit`, property-тесты инвариантов, сценарии из найденных багов | инварианты I1–I12 проходят на 10⁵ случайных последовательностей |
-| **2. Логика** | `wit/logic.wit`, `touchbar-logic-types`, `-runtime`, `-sdk`, перенос плагина `controls` | `controls` проходит тесты логики в testkit |
-| **3. Сессия** | `touchbar-sets`, перенос `touchbar-ui` и `touchbar-layout`, исполнитель действий, `touchbar-audio`, поверхность `headless` и симулятор, `touchbarctl render/status` | `controls` работает в симуляторе, эталонные PNG |
+| **2. Логика** | `wit/logic.wit`, `touchbar-logic-types`, `-runtime`, `-sdk`, формат наборов и манифеста (`touchbar-sets`, D66), перенос плагина `controls` | `controls` проходит тесты логики в testkit |
+| **3. Сессия** | дерево UI из наборов (`touchbar-sets`), перенос `touchbar-ui` и `touchbar-layout`, исполнитель действий, `touchbar-audio`, поверхность `headless` и симулятор, `touchbarctl render/status` | `controls` работает в симуляторе, эталонные PNG |
 | **4. touchbard** | протокол v2, рефакторинг `touchbard`: режимы, владение по logind, recovery, сон, мост Fn, затемнение | на железе: чек-лист пунктов 1, 3–7 ([13-testing.md](13-testing.md)) |
 | **5. Содержимое** | `touchbar-media`, `touchbar-open`, `touchbar-apps`, API рабочего стола, бэкенд GNOME и расширение, плагины `system`, `media`, `browser`, `profile-*` | весь список паритета v1 на железе |
 | **6. Выпуск** | `touchbarctl` полностью, `xtask install/deb`, PKGBUILD, CI, Releases, переход wsconfig на пакет с удалением `ws-touchbar-fn` | установка `.deb` на чистую систему и на рабочую машину через wsconfig |
@@ -17,6 +17,8 @@
 Этап 1: результаты проверок и границы реализованного ядра —
 [приёмка](../validation/stage-1.md). Команды для обычных и длинных тестов —
 [testing.md](../testing.md). Следующие этапы пока описывают целевое поведение.
+
+Этап 2: [план](../plans/stage-2-logic.md).
 
 ## Паритет v1
 

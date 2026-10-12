@@ -91,7 +91,7 @@ Touch Bar для MacBook с чипом T2 под Linux. Основная маш�
 | `touchbar-logic-types` | Лимиты, бюджеты и валидация, общие для хоста и SDK | новый |
 | `touchbar-logic-runtime` | Wasmtime, биндинги WIT, epoch-прерывания | из `touchbar-plugin-host/src/sets` |
 | `touchbar-logic-sdk` | SDK для логики плагинов (guest) | перенос из `touchbar-logic-sdk` под новый WIT |
-| `touchbar-sets` | Схема наборов TOML и построение дерева UI из набора и состояния | из `touchbar-set-config` и `sets/renderer.rs` |
+| `touchbar-sets` | Манифест плагина и схема наборов TOML (этап 2), построение дерева UI из набора и состояния (этап 3) | из `touchbar-set-config` и `sets/renderer.rs` |
 | `touchbar-ui`, `touchbar-layout` | Отрисовка (GL, taffy, cosmic-text, resvg, шейдеры, canvas) и раскладка | перенос целиком |
 | `touchbar-profiles` | Формат профилей и выбор профиля | из `touchbar-profile-config` |
 | `touchbar-apps` | Категории приложений из desktop-файлов | новый |
@@ -105,6 +105,7 @@ Touch Bar для MacBook с чипом T2 под Linux. Основная маш�
 | `touchbar-session` | Бинарник сессии: оболочка, связывающая всё вместе | новый |
 | `touchbarctl` | CLI | новый, части из `touchbar-cli` |
 | `touchbar-testkit` | Поддельный `touchbard`, DSL сценариев, эталонные кадры | новый, идеи из replay-харнесса |
+| `touchbar-wasm-fixtures` | Сборка плагинов и тестовых модулей в wasm-компоненты для `cargo test` | новый |
 | `xtask` | Сборка wasm-плагинов, staging-дерево, пакеты | новый |
 
 Кроме крейтов, в репозитории лежат `gnome-extension/` (расширение GNOME Shell), `plugins/` (плагины первой версии) и `wit/` (контракт логики).

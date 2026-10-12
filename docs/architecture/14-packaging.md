@@ -51,7 +51,7 @@ RPM (Fedora через COPR) — позже, если появится спро�
 
 ## Сборка
 
-- **Rust:** stable, MSRV фиксируется в `rust-toolchain.toml`. Цели: `x86_64-unknown-linux-gnu`, а для плагинов `wasm32-unknown-unknown` с превращением в компонент (`wasm-tools component new` внутри `xtask`).
+- **Rust:** stable, MSRV фиксируется в `rust-toolchain.toml`. Цели: `x86_64-unknown-linux-gnu`, а для плагинов `wasm32-unknown-unknown` (тоже в `rust-toolchain.toml`) с превращением в компонент библиотекой `wit-component` внутри `xtask` и `touchbar-wasm-fixtures`.
 - **Системные зависимости сборки:** `libpipewire-0.3-dev`, `libdrm-dev`, `libgbm-dev`, `libegl-dev`, `libudev-dev`, `libfontconfig-dev`.
 - **Локальная сборка на машине пользователя** — в distrobox `touchbar-build` (на хосте нет компилятора).
 
