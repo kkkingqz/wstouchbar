@@ -125,4 +125,4 @@ Testkit (`invariants.rs`, `strategies.rs`, `recording.rs`) просмотрен 
 |---|---|
 | `cargo fmt --all --check`, `clippy -D warnings` | пройдены |
 | `PROPTEST_CASES=2000 cargo test --workspace --locked` | 337 тестов, 0 ошибок |
-| `PROPTEST_CASES=100000 cargo test --workspace --release --locked` | выполняется |
+| `PROPTEST_CASES=100000 cargo test --workspace --release --locked` | 337 тестов, 0 ошибок, 648 с (I1–I12 без нарушений) |
