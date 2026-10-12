@@ -27,7 +27,7 @@
 ```wit
 package wstouchbar:logic@1.0.0;
 
-interface types {
+interface api {
     enum scalar-kind { boolean, number, text }
     variant scalar { boolean(bool), number(f64), text(string) }
 
@@ -80,9 +80,7 @@ interface types {
     }
 
     record call-context { now-ms: u64 }
-}
 
-interface effects {
     // Подробно — в 06-effects.md
     variant effect { /* audio, media, desktop, key, open-uri, spawn, dbus-call, timer */ }
     enum lifetime { until-hidden, committed }
@@ -96,18 +94,10 @@ interface effects {
     variant subscription-kind { /* audio-watch, media-watch, desktop-fact, interval, spawn-lines, dbus-signal */ }
     record subscription { tag: string, kind: subscription-kind, background: bool }
     // effect-result, subscription-data, subscription-lost — типизированные варианты по видам
-}
 
-interface presentation {
     enum placement { anchored, region, full }
     enum lifecycle { transient, persistent }   // transient — пока держится касание-якорь
     variant command { open(tuple<string, placement, lifecycle>), close }
-}
-
-world logic {
-    use types.{description, event, call-context, state-patch};
-    use effects.{request, subscription};
-    use presentation.{command};
 
     record update {
         state: state-patch,
@@ -117,12 +107,15 @@ world logic {
         presentation: option<command>,
     }
 
+    describe: func() -> description;
+    init: func(config: string, persisted: state-patch, ctx: call-context) -> result<update, string>;
+    handle: func(event: event, ctx: call-context) -> result<update, string>;
+}
+
+world logic {
     enum log-level { trace, debug, info, warn, error }
     import log: func(level: log-level, message: string);
-
-    export describe: func() -> description;
-    export init: func(config: string, persisted: state-patch, ctx: call-context) -> result<update, string>;
-    export handle: func(event: event, ctx: call-context) -> result<update, string>;
+    export api;
 }
 ```
 
@@ -130,11 +123,13 @@ world logic {
 
 Каждый тип WIT один к одному соответствует типу `touchbar-model`. Биндинги хоста и гостя генерируются из `wit/logic.wit`, ручных копий типов нет. `surface-kind`, `color-scheme` и имена фактов — строки: новые значения не меняют контракт. NaN при переходе границы компонента может потерять payload; ядро всё равно отвергает неконечные значения.
 
+Типы контракта и функции `describe`, `init`, `handle` объявлены в одном интерфейсе `api`. Его полное имя экспорта — `wstouchbar:logic/api@1.0.0`. Так номер версии доступен runtime явно, а вспомогательные интерфейсы типов не создают транзитивных импортов. Единственный импорт world — функция `log`.
+
 ## Исполнение
 
 - **Время.** Время задаёт вызывающий: runtime передаёт `call-context.now-ms` из аргумента вызова, других часов у модуля нет (D68).
 - **Детерминизм.** Движок настроен детерминированно: канонизация NaN, без потоков, детерминированный relaxed SIMD, без WASI. Одинаковые входы дают одинаковые обновления.
-- **Версии.** Версия контракта определяется по типам, которые экспортирует компонент. В component model типы сверяются точно, поэтому у каждой версии world свои биндинги в runtime с общим переводом в типы модели (D69). В v1 поддерживается только `wstouchbar:logic@1.0.0`. Другая версия или любой импорт, кроме `log`, дают `InstanceFault` при загрузке.
+- **Версии.** Runtime сначала требует точное имя экспорта `wstouchbar:logic/api@1.0.0`, затем сверяет типы с биндингами v1 (D69). Совпадение сигнатур само по себе не подтверждает версию: компонент с экспортом `wstouchbar:logic/api@9.0.0` отвергается даже при идентичных типах. У каждой будущей поддерживаемой версии интерфейса свои биндинги с общим переводом в типы модели. Неподдерживаемая версия, несовместимые типы или любой импорт, кроме `log`, дают `InstanceFault` при загрузке.
 - **Модули.** Модуль хранится по плагину и ревизии; живые экземпляры держат прежний модуль до уничтожения, `describe` вызывается один раз на модуль. После trap экземпляр освобождается, повтор идёт через `CreateInstance` нового поколения.
 - **Журнал гостя.** Записи возвращаются вместе с ответом вызова, в journald их отправляет оболочка. Не больше 64 записей по 1 КиБ за вызов, остальные заменяются одной записью-счётчиком.
 
