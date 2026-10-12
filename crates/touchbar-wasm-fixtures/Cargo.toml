@@ -13,3 +13,7 @@ wit-component.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+wit-component.workspace = true
+wit-parser.workspace = true

@@ -1233,6 +1233,7 @@ name = "touchbar-controls"
 version = "0.1.0"
 dependencies = [
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
@@ -1251,70 +1252,86 @@ dependencies = [
 name = "touchbar-fixture-budget"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-echo"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-err"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-hang"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-log"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-oom"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-persist"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-trap"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "touchbar-logic-sdk",
+ "touchbar-model",
 ]
 
 [[package]]
 name = "touchbar-fixture-version"
 version = "0.1.0"
 dependencies = [
- "touchbar-logic-sdk",
+ "wit-bindgen",
 ]
 
 [[package]]
 name = "touchbar-fixture-wasi"
 version = "0.1.0"
 dependencies = [
- "touchbar-logic-sdk",
+ "wit-bindgen",
 ]
 
 [[package]]
@@ -1385,6 +1402,7 @@ name = "touchbar-wasm-fixtures"
 version = "0.1.0"
 dependencies = [
  "wit-component 0.261.0",
+ "wit-parser 0.261.0",
 ]
 
 [[package]]
