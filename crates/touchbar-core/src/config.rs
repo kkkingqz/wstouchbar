@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use touchbar_logic_types::LogicLimits;
 use touchbar_model::{Mm, ModelError};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,6 +30,7 @@ pub struct CoreConfig {
 }
 impl Default for CoreConfig {
     fn default() -> Self {
+        let logic = LogicLimits::default();
         Self {
             max_surfaces: 8,
             profile_pending_ms: 1500,
@@ -44,14 +46,14 @@ impl Default for CoreConfig {
             swipe_distance: Mm(4.0),
             swipe_speed_mm_s: 40.0,
             fallback_distance: Mm(3.0),
-            logic_soft_ms: 5,
-            logic_hard_ms: 50,
-            max_update_bytes: 262144,
-            max_requests_per_update: 64,
-            max_subscriptions: 32,
-            max_text_bytes: 4096,
-            max_records: 1000,
-            max_persist_bytes: 65536,
+            logic_soft_ms: logic.logic_soft_ms,
+            logic_hard_ms: logic.logic_hard_ms,
+            max_update_bytes: logic.max_update_bytes,
+            max_requests_per_update: logic.max_requests_per_update,
+            max_subscriptions: logic.max_subscriptions,
+            max_text_bytes: logic.max_text_bytes,
+            max_records: logic.max_records,
+            max_persist_bytes: logic.max_persist_bytes,
         }
     }
 }
