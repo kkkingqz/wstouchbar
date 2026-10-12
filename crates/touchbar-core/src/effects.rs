@@ -57,6 +57,12 @@ impl Core {
                 continue;
             }
             let policy = request.policy();
+            if policy.lifetime == Lifetime::UntilHidden
+                && self.instances[&owner.number].status != InstanceStatus::Visible
+            {
+                warn(output, "until-hidden request requires a visible instance");
+                continue;
+            }
             if let Some(key) = &policy.coalesce {
                 let replaced: Vec<_> = self
                     .requests

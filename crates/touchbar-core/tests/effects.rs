@@ -1296,3 +1296,69 @@ fn layer_preserves_underlying_subscriptions_and_committed_effects() {
             .any(|i| matches!(i.plane, ScenePlane::Layer(_)))
     );
 }
+
+#[test]
+fn hidden_requests_are_rejected_without_a_completion_retry_loop() {
+    for background in [false, true] {
+        let (mut c, _) = setup(CoreConfig::default());
+        let subscribed = submit(
+            &mut c,
+            1,
+            LogicUpdate {
+                subscriptions: Some(vec![sub("audio", true)]),
+                ..LogicUpdate::default()
+            },
+        );
+        let subscription = subscriptions(&subscribed)[0];
+        let hidden = c.handle(
+            Timestamp(2),
+            Input::Mode {
+                surface: SurfaceId(1),
+                mode: Mode::Native,
+            },
+        );
+        let invocation = if background {
+            drain(&mut c, 2, hidden);
+            c.handle(
+                Timestamp(3),
+                Input::SubscriptionData {
+                    subscription,
+                    data: SubscriptionData::Audio(AudioState {
+                        available: true,
+                        volume: 0.5,
+                        muted: false,
+                        name: "device".into(),
+                    }),
+                },
+            )
+        } else {
+            hidden
+        };
+        let out = reply(
+            &mut c,
+            3,
+            &invocation,
+            LogicUpdate {
+                requests: vec![
+                    req("hidden-read", Effect::TimerAfter { ms: 100 }),
+                    req("background-write", Effect::MediaNext),
+                ],
+                ..LogicUpdate::default()
+            },
+        );
+        assert!(
+            out.iter()
+                .any(|o| matches!(o, Output::Log { level: LogLevel::Warn, event }
+            if event.contains("until-hidden"))),
+            "{out:?}"
+        );
+        assert!(
+            call(&out).is_none(),
+            "rejected request fed a completion back: {out:?}"
+        );
+        assert_eq!(starts(&out).len(), 1);
+        assert_eq!(starts(&out)[0].1, Effect::MediaNext);
+        assert_eq!(c.snapshot().requests.len(), 1);
+        assert_eq!(c.snapshot().requests[0].tag, "background-write");
+    }
+}
