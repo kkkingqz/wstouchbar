@@ -404,12 +404,23 @@ fn checker_accepts_only_prequeued_cleanup_on_hidden_instance() {
     let mut after = before.clone();
     after.instances[0].queue.clear();
     after.instances[0].queue_len = 0;
-    let mut checker = InvariantChecker::new(before);
+    let mut checker = InvariantChecker::new(before.clone());
     checker.observe(&entry, &after).unwrap();
+    let mut after_dispose = entry;
+    after_dispose
+        .outputs
+        .insert(0, Output::DisposeInstance { instance: id });
+    let mut checker = InvariantChecker::new(before);
+    assert_eq!(
+        checker
+            .observe(&after_dispose, &after)
+            .unwrap_err()
+            .invariant,
+        Invariant::I8
+    );
 }
 
-#[test]
-fn delayed_cancel_before_hidden_passes_checker_and_replay() {
+fn cleanup_harness() -> Harness {
     let mut h = Harness::new(CoreConfig::default());
     h.enable_invariant_checks();
     let mut cat = fixtures::controls_with_panel();
@@ -436,6 +447,9 @@ fn delayed_cancel_before_hidden_passes_checker_and_replay() {
             LogicReaction::Update(LogicUpdate::default())
         }
     });
+    let mut other = ProfileSpec::default_for("controls/other".parse().unwrap());
+    other.for_target = Some(ProfileTarget::App("other".into()));
+    cat.profiles.push(other);
     h.send(Input::Catalog(cat));
     let mut surface = headless(1);
     surface.caps.modes = true;
@@ -444,6 +458,12 @@ fn delayed_cancel_before_hidden_passes_checker_and_replay() {
         surface: SurfaceId(1),
         mode: Mode::Display,
     });
+    h
+}
+
+#[test]
+fn delayed_cancel_before_hidden_passes_checker_and_replay() {
+    let mut h = cleanup_harness();
     let start = h.logic.calls.len();
     h.touch(
         SurfaceId(1),
@@ -477,6 +497,52 @@ fn delayed_cancel_before_hidden_passes_checker_and_replay() {
         }))
     ));
     assert!(matches!(calls[2], LogicCall::Handle(LogicEvent::Hidden)));
+    assert!(h.invariant_error.is_none(), "{:?}", h.invariant_error);
+    h.finish_invariant_checks().unwrap();
+    assert_eq!(
+        ReplayDump::from_json(&h.dump().to_json().unwrap())
+            .unwrap()
+            .replay()
+            .unwrap()
+            .core
+            .snapshot(),
+        h.snapshot()
+    );
+}
+
+#[test]
+fn delayed_cleanup_before_dispose_passes_checker_and_replay() {
+    let mut h = cleanup_harness();
+    let start = h.logic.calls.len();
+    h.touch(
+        SurfaceId(1),
+        1,
+        TouchPhase::Down,
+        h.hit(SurfaceId(1), "microphone"),
+    );
+    h.send(Input::Mode {
+        surface: SurfaceId(1),
+        mode: Mode::Native,
+    });
+    h.send(Input::Fact {
+        name: "app.id".into(),
+        value: Some(FactValue::Text("other".into())),
+    });
+    assert!(h.snapshot().surfaces[0].profile.pending.is_some());
+    h.advance_ms(10);
+    assert!(h.snapshot().instances.is_empty());
+    let calls: Vec<_> = h.logic.calls[start..]
+        .iter()
+        .map(|(_, _, call)| call)
+        .collect();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(matches!(
+        calls[1],
+        LogicCall::Handle(LogicEvent::Action(ActionEvent {
+            kind: ActionKind::Cancelled,
+            ..
+        }))
+    ));
     assert!(h.invariant_error.is_none(), "{:?}", h.invariant_error);
     h.finish_invariant_checks().unwrap();
     assert_eq!(

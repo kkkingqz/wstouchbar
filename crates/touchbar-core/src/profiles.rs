@@ -219,6 +219,7 @@ pub struct ProfileSwitch {
 }
 impl ProfileSwitch {
     /// Returns true when the active profile changes. Pending target changes retain the deadline.
+    /// Pending expiry is explicit: the caller performs capture/callback cleanup before `expire`.
     pub fn request(
         &mut self,
         now: Timestamp,

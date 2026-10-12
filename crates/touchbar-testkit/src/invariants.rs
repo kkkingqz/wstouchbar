@@ -417,7 +417,7 @@ impl InvariantChecker {
                                         kind: ActionKind::Cancelled,
                                         ..
                                     }))
-                                ) && current.is_some_and(|i| i.status == InstanceStatus::Hidden)
+                                ) && live.is_some_and(|i| i.status == InstanceStatus::Hidden)
                                     && prior.is_some_and(|i| i.queue.contains(invocation))
                                     && !disposed.contains(id),
                             I5,
