@@ -12,6 +12,15 @@ struct Geometry {
     hits: HitMap,
     scrubbers: Vec<ScrubberLayout>,
 }
+fn atomic_widgets<'a>(widgets: &'a [WidgetSpec], out: &mut Vec<&'a WidgetSpec>) {
+    for widget in widgets {
+        if widget.children.is_empty() || !matches!(widget.kind, WidgetKind::Noninteractive) {
+            out.push(widget);
+        } else {
+            atomic_widgets(&widget.children, out);
+        }
+    }
+}
 impl FakeRenderer {
     pub fn width(&mut self, widget: &str, width: f32) {
         assert!(
@@ -37,14 +46,9 @@ impl FakeRenderer {
         geometry: &mut Geometry,
     ) {
         let mut leaves = vec![];
-        for widget in widgets {
-            widget.visit(&mut leaves);
-        }
+        atomic_widgets(widgets, &mut leaves);
         let mut x = bounds.x;
         for widget in leaves {
-            if !widget.children.is_empty() {
-                continue;
-            }
             let width = self
                 .widget_width(widget, info, item.units)
                 .min((bounds.x + bounds.width - x).max(0.0));
@@ -123,12 +127,9 @@ impl FakeRenderer {
         let mut x = 0.0;
         for item in &scene.items {
             let mut widgets = vec![];
-            for widget in &item.set.widgets {
-                widget.visit(&mut widgets);
-            }
+            atomic_widgets(&item.set.widgets, &mut widgets);
             let desired = widgets
                 .into_iter()
-                .filter(|w| w.children.is_empty())
                 .map(|w| self.widget_width(w, info, item.units))
                 .sum::<f32>()
                 .max(1.0);
@@ -176,7 +177,12 @@ impl FakeRenderer {
                 },
                 Placement::Region => panel.region,
                 Placement::Anchored => {
-                    let width = (panel.panel.widgets.len() as f32 * 80.0)
+                    let mut widgets = vec![];
+                    atomic_widgets(&panel.panel.widgets, &mut widgets);
+                    let width = widgets
+                        .iter()
+                        .map(|w| self.widget_width(w, info, item.units))
+                        .sum::<f32>()
                         .max(1.0)
                         .min(info.width_px as f32);
                     Rect {

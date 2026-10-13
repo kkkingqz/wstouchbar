@@ -18,7 +18,7 @@ struct Job {
     guard: Guard,
     repeat: Option<u64>,
 }
-pub struct Harness {
+pub struct Harness<H: LogicHost = FakeLogic> {
     core: Core,
     catalog: Catalog,
     checker: Option<InvariantChecker>,
@@ -31,15 +31,20 @@ pub struct Harness {
     pending_calls: BTreeSet<(InstanceId, CallId)>,
     runtime_sets: BTreeMap<InstanceId, SetRef>,
     contacts: BTreeMap<(SurfaceId, ContactId), Point>,
-    stored: Vec<(PersistKey, StatePatch)>,
     recorder: Recorder,
     pub trace: Vec<TraceEntry>,
-    pub logic: FakeLogic,
+    pub logic: H,
+    pub host_errors: Vec<String>,
     pub effects: FakeEffects,
     pub renderer: FakeRenderer,
 }
-impl Harness {
+impl Harness<FakeLogic> {
     pub fn new(config: CoreConfig) -> Self {
+        Self::with_logic(config, FakeLogic::default())
+    }
+}
+impl<H: LogicHost> Harness<H> {
+    pub fn with_logic(config: CoreConfig, logic: H) -> Self {
         let logic_timeout_ms = config.logic_hard_ms;
         let core = Core::new(config);
         let recorder = Recorder::new(&core);
@@ -57,9 +62,9 @@ impl Harness {
             pending_calls: BTreeSet::new(),
             runtime_sets: BTreeMap::new(),
             contacts: BTreeMap::new(),
-            stored: vec![],
             trace: vec![],
-            logic: FakeLogic::default(),
+            logic,
+            host_errors: vec![],
             effects: FakeEffects::default(),
             renderer: FakeRenderer::default(),
         }
@@ -214,26 +219,18 @@ impl Harness {
                     .find(|s| s.reference == set)
                     .expect("created instance in accepted catalog")
                     .clone();
-                let description = self.logic.description(&spec);
+                let provider = spec
+                    .logic
+                    .as_ref()
+                    .and_then(|id| self.catalog.plugins.iter().find(|p| &p.id == id));
+                let reply = self
+                    .logic
+                    .create(self.clock, instance, &spec, provider, &persist_key);
                 self.runtime_sets.insert(instance, set);
-                let persisted = self
-                    .stored
-                    .iter()
-                    .find(|(key, _)| key == &persist_key)
-                    .map(|(_, fields)| fields.clone())
-                    .unwrap_or_default();
-                self.schedule(
-                    self.clock,
-                    Input::LogicDescribed {
-                        instance,
-                        description,
-                        persisted,
-                    },
-                    Guard::Always,
-                    None,
-                );
+                self.schedule(self.clock, reply, Guard::Always, None);
             }
             Output::DisposeInstance { instance } => {
+                self.logic.dispose(instance);
                 self.runtime_sets.remove(&instance);
                 self.pending_calls.retain(|(id, _)| *id != instance);
             }
@@ -246,43 +243,10 @@ impl Harness {
                     return;
                 };
                 self.pending_calls.insert((instance, call));
-                let reaction = self.logic.call(set, instance, call, &invocation);
-                let (ms, input) = match reaction {
-                    LogicReaction::Update(update) => (
-                        0,
-                        Some(Input::LogicUpdate {
-                            instance,
-                            call,
-                            update,
-                        }),
-                    ),
-                    LogicReaction::Delayed { ms, update } => (
-                        ms,
-                        Some(Input::LogicUpdate {
-                            instance,
-                            call,
-                            update,
-                        }),
-                    ),
-                    LogicReaction::Error(message) => (
-                        0,
-                        Some(Input::LogicError {
-                            instance,
-                            call,
-                            message,
-                        }),
-                    ),
-                    LogicReaction::Fault(reason) => (
-                        0,
-                        Some(Input::LogicFault {
-                            instance,
-                            call,
-                            reason,
-                        }),
-                    ),
-                    LogicReaction::Hang => (0, None),
-                };
-                if let Some(input) = input {
+                if let Some((ms, input)) =
+                    self.logic
+                        .invoke(self.clock, set, instance, call, &invocation)
+                {
                     self.schedule(
                         self.clock.after(ms),
                         input,
@@ -369,21 +333,8 @@ impl Harness {
                 }
             }
             Output::Persist { key, fields, .. } => {
-                let index = self
-                    .stored
-                    .iter()
-                    .position(|(k, _)| k == &key)
-                    .unwrap_or_else(|| {
-                        self.stored.push((key, vec![]));
-                        self.stored.len() - 1
-                    });
-                for (name, value) in fields {
-                    let saved = &mut self.stored[index].1;
-                    if let Some((_, old)) = saved.iter_mut().find(|(n, _)| n == &name) {
-                        *old = value;
-                    } else {
-                        saved.push((name, value));
-                    }
+                if let Err(e) = self.logic.persist(&key, &fields) {
+                    self.host_errors.push(e);
                 }
             }
             Output::SendKey { .. }
@@ -459,5 +410,94 @@ impl Harness {
         let point = self.hit(surface, widget);
         self.touch(surface, 1, TouchPhase::Down, point);
         self.touch_up(surface, 1);
+    }
+    /// Normalized slider coordinates. Virtual time advances evenly between moves.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn drag(
+        &mut self,
+        surface: SurfaceId,
+        widget: &str,
+        from: f64,
+        to: f64,
+        duration: u64,
+        steps: u32,
+    ) {
+        assert!(
+            steps > 0
+                && from.is_finite()
+                && to.is_finite()
+                && (0.0..=1.0).contains(&from)
+                && (0.0..=1.0).contains(&to),
+            "valid drag values and positive step count"
+        );
+        self.hit(surface, widget);
+        let rect = self.renderer.hits[&surface]
+            .iter()
+            .filter(|h| h.widget.as_str() == widget)
+            .max_by_key(|h| h.plane)
+            .expect("slider hit")
+            .rect;
+        let point = |value: f64| Point {
+            x: rect.x + rect.width * value as f32,
+            y: rect.y + rect.height / 2.0,
+        };
+        let mut start = point(from);
+        start.x = start
+            .x
+            .min(rect.x + rect.width - (rect.width * 0.00001).max(f32::EPSILON));
+        assert!(
+            !self
+                .contacts
+                .contains_key(&(surface, ContactId::new(1).unwrap())),
+            "drag contact already down"
+        );
+        self.touch(surface, 1, TouchPhase::Down, start);
+        let mut elapsed = 0;
+        for step in 1..=steps {
+            let at = u64::try_from(u128::from(duration) * u128::from(step) / u128::from(steps))
+                .expect("time <= duration");
+            self.advance_ms(at - elapsed);
+            elapsed = at;
+            self.touch(
+                surface,
+                1,
+                TouchPhase::Move,
+                point(from + (to - from) * f64::from(step) / f64::from(steps)),
+            );
+        }
+        self.touch_up(surface, 1);
+    }
+    /// Deliver to every active subscription for this set/tag on one surface.
+    pub fn subscription_data(
+        &mut self,
+        surface: SurfaceId,
+        set: &str,
+        tag: &str,
+        data: SubscriptionData,
+    ) {
+        let set: SetRef = set.parse().expect("subscription set ref");
+        let snapshot = self.snapshot();
+        let ids: Vec<_> = snapshot
+            .subscriptions
+            .iter()
+            .filter(|s| {
+                s.spec.tag == tag
+                    && snapshot
+                        .instances
+                        .iter()
+                        .any(|i| i.id == s.owner && i.surface == surface && i.set == set)
+            })
+            .filter_map(|s| s.active)
+            .collect();
+        assert!(
+            !ids.is_empty(),
+            "no active subscription for {set}/{tag} on {surface:?}"
+        );
+        for subscription in ids {
+            self.send(Input::SubscriptionData {
+                subscription,
+                data: data.clone(),
+            });
+        }
     }
 }

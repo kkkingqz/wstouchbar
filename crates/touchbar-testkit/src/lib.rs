@@ -20,3 +20,10 @@ pub use invariants::*;
 pub mod strategies;
 
 pub mod logic_strategies;
+
+mod wasm;
+pub use wasm::*;
+mod module_tester;
+pub use module_tester::*;
+mod plugin;
+pub use plugin::*;

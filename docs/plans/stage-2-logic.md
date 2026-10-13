@@ -267,7 +267,7 @@ impl Runtime {
   m.handle(action("volume-level", ValueChanged, 0.7)).expect_request(|r| r.coalesce.as_deref() == Some("volume"));
   ```
 - **DSL сценариев:** `drag(widget, from, to, duration, steps)` для ползунков и `subscription_data(set, tag, data)` для подачи данных по тегу подписки экземпляра.
-- **Property I1–I12 с настоящей логикой:** стратегии этапа 1 на каталоге `controls` с `WasmLogic`. 200 случаев в CI, 10⁴ в `proptest-long`.
+- **Проверка инфраструктуры:** настоящие тестовые wasm-модули, виртуальное время, сбои, подписки и сохранение. Property на controls выполняется в конце L11, когда реализована его логика (согласовано 2026-10-13).
 
 ### L11. controls: наборы и логика
 
@@ -298,6 +298,8 @@ impl Runtime {
   - яркость: `brightness`, `brightness_text`, `brightness_label`.
 - **Значки.** Имена значков пока строки исходного проекта, соответствие символам задаёт рендер этапа 3.
 - **Сохраняемых полей нет.**
+
+- **Property I1–I12 с настоящей логикой:** стратегии этапа 1 на каталоге `controls` с `WasmLogic`. 200 случаев в CI, 10⁴ в `proptest-long`.
 
 ### L12. controls: тесты
 

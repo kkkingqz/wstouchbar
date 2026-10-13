@@ -15,3 +15,7 @@ touchbar-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 proptest.workspace = true
+touchbar-logic-runtime.workspace = true
+touchbar-sets.workspace = true
+touchbar-wasm-fixtures.workspace = true
+sha2 = "0.10"

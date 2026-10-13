@@ -1410,8 +1410,12 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "sha2",
  "touchbar-core",
+ "touchbar-logic-runtime",
  "touchbar-model",
+ "touchbar-sets",
+ "touchbar-wasm-fixtures",
 ]
 
 [[package]]
