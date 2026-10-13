@@ -230,3 +230,56 @@ fn cache_configuration_is_applied_and_invalid_paths_are_rejected() {
     drop(r);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn worker_prepares_module_while_runtime_keeps_live_instance() {
+    let mut r = runtime();
+    load(&mut r, "old", fixtures::ECHO);
+    create(&mut r, 1, "old");
+    init(&mut r, 1);
+    let compiler = r.compiler();
+    let worker =
+        std::thread::spawn(move || compiler.prepare(&std::fs::read(fixtures::ECHO).unwrap()));
+    update(&mut r, 1, LogicCall::Handle(LogicEvent::Shown));
+    let prepared = worker.join().unwrap();
+    assert!(prepared.is_ok());
+    r.install(plugin(), "worker", prepared).unwrap();
+    create(&mut r, 2, "worker");
+    init(&mut r, 2);
+    assert_eq!(
+        update(&mut r, 1, LogicCall::Handle(LogicEvent::Shown)),
+        update(&mut r, 2, LogicCall::Handle(LogicEvent::Shown))
+    );
+    // Both success and failure records remain immutable on installation.
+    r.install(plugin(), "worker", Err(LoadError("replacement".into())))
+        .unwrap();
+    r.install(
+        plugin(),
+        "failed",
+        Err(LoadError("failed preparation".into())),
+    )
+    .unwrap_err();
+    let prepared = r
+        .compiler()
+        .prepare(&std::fs::read(fixtures::ECHO).unwrap());
+    assert!(
+        r.install(plugin(), "failed", prepared)
+            .unwrap_err()
+            .0
+            .contains("failed preparation")
+    );
+}
+#[test]
+fn prepared_module_from_another_engine_is_rejected_without_affecting_live_guest() {
+    let mut r = runtime();
+    load(&mut r, "old", fixtures::ECHO);
+    create(&mut r, 1, "old");
+    init(&mut r, 1);
+    let other = runtime();
+    let prepared = other
+        .compiler()
+        .prepare(&std::fs::read(fixtures::ECHO).unwrap());
+    let error = r.install(plugin(), "foreign", prepared).unwrap_err();
+    assert!(error.0.contains("engine"), "{error}");
+    update(&mut r, 1, LogicCall::Handle(LogicEvent::Shown));
+}

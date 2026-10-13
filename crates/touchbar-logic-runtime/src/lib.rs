@@ -20,7 +20,7 @@ use std::{
 use touchbar_core::{Input, PersistKey};
 use touchbar_logic_types::LogicLimits;
 use touchbar_model::*;
-use wasmtime::component::{Component, HasSelf, Linker};
+use wasmtime::component::{HasSelf, Linker};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Store};
 
 #[derive(Clone, Debug)]
@@ -135,6 +135,8 @@ struct Instance {
 }
 mod epoch;
 use epoch::EpochTicker;
+mod compiler;
+pub use compiler::{Compiler, PreparedModule};
 pub struct Runtime {
     engine: Engine,
     linker: Linker<HostState>,
@@ -181,60 +183,51 @@ impl Runtime {
             ticker,
         })
     }
+    pub fn compiler(&self) -> Compiler {
+        Compiler {
+            engine: self.engine.clone(),
+            linker: self.linker.clone(),
+        }
+    }
+    /// Install a worker's result without compiling or running the guest.
+    /// Successful and failed revision records are both immutable until eviction.
+    pub fn install(
+        &mut self,
+        plugin: PluginId,
+        revision: &str,
+        prepared: Result<PreparedModule, LoadError>,
+    ) -> Result<(), LoadError> {
+        let key = (plugin, revision.to_owned());
+        if let Some(module) = self.modules.get(&key) {
+            return module.as_ref().map(|_| ()).map_err(Clone::clone);
+        }
+        let module = prepared.and_then(|prepared| {
+            if !Engine::same(&self.engine, &prepared.engine) {
+                return Err(LoadError(
+                    "prepared module belongs to another engine".into(),
+                ));
+            }
+            Ok(Module {
+                pre: prepared.pre,
+                description: None,
+            })
+        });
+        let result = module.as_ref().map(|_| ()).map_err(Clone::clone);
+        self.modules.insert(key, module);
+        result
+    }
+    /// Synchronous convenience. Session loaders use compiler().prepare in a worker.
     pub fn load_module(
         &mut self,
         plugin: PluginId,
         revision: &str,
         bytes: &[u8],
     ) -> Result<(), LoadError> {
-        let key = (plugin, revision.to_owned());
-        if let Some(module) = self.modules.get(&key) {
+        if let Some(module) = self.modules.get(&(plugin.clone(), revision.to_owned())) {
             return module.as_ref().map(|_| ()).map_err(Clone::clone);
         }
-        let module = (|| {
-            let component =
-                Component::new(&self.engine, bytes).map_err(|e| LoadError(format!("{e:#}")))?;
-            let ty = component.component_type();
-            let exports: Vec<_> = ty
-                .exports(&self.engine)
-                .map(|(name, _)| name.to_owned())
-                .collect();
-            if !exports
-                .iter()
-                .any(|name| name == "wstouchbar:logic/api@1.0.0")
-            {
-                return Err(LoadError(format!(
-                    "expected export wstouchbar:logic/api@1.0.0; found {exports:?}"
-                )));
-            }
-            for (name, import) in ty.imports(&self.engine) {
-                let allowed = matches!(
-                    (name, import.ty),
-                    (
-                        "log",
-                        wasmtime::component::types::ComponentItem::ComponentFunc(_)
-                    ) | (
-                        "log-level",
-                        wasmtime::component::types::ComponentItem::Type(_)
-                    )
-                );
-                if !allowed {
-                    return Err(LoadError(format!("forbidden import {name}")));
-                }
-            }
-            let pre = self
-                .linker
-                .instantiate_pre(&component)
-                .and_then(bindings::LogicPre::new)
-                .map_err(|e| LoadError(format!("v1 interface types: {e:#}")))?;
-            Ok(Module {
-                pre,
-                description: None,
-            })
-        })();
-        let result = module.as_ref().map(|_| ()).map_err(Clone::clone);
-        self.modules.insert(key, module);
-        result
+        let prepared = self.compiler().prepare(bytes);
+        self.install(plugin, revision, prepared)
     }
     fn instantiate(&self, pre: &bindings::LogicPre<HostState>) -> Result<Instance, String> {
         let limiter = MemoryLimiter::new(&self.config.limits);
