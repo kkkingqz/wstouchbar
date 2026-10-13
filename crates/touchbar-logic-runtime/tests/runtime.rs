@@ -283,3 +283,26 @@ fn prepared_module_from_another_engine_is_rejected_without_affecting_live_guest(
     assert!(error.0.contains("engine"), "{error}");
     update(&mut r, 1, LogicCall::Handle(LogicEvent::Shown));
 }
+
+#[test]
+fn module_retention_evicts_old_records_without_disposing_live_instances() {
+    let mut r = runtime();
+    load(&mut r, "old", fixtures::ECHO);
+    create(&mut r, 1, "old");
+    init(&mut r, 1);
+    load(&mut r, "accepted", fixtures::ECHO);
+    r.load_module(plugin(), "failed", b"invalid").unwrap_err();
+    r.retain_modules(|p, revision| p == &plugin() && revision == "accepted");
+    for revision in ["old", "failed"] {
+        assert!(
+            matches!(r.create(Timestamp(0), id(3), &plugin(), revision, &set(), &key()), Input::InstanceFault {ref reason, ..} if reason.contains("not loaded"))
+        );
+    }
+    update(&mut r, 1, LogicCall::Handle(LogicEvent::Shown));
+    create(&mut r, 2, "accepted");
+    init(&mut r, 2);
+    // A failed record really was removed: valid preparation under that key can succeed.
+    load(&mut r, "failed", fixtures::ECHO);
+    create(&mut r, 3, "failed");
+    init(&mut r, 3);
+}

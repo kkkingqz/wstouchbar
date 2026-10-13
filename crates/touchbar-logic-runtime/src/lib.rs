@@ -229,6 +229,12 @@ impl Runtime {
         let prepared = self.compiler().prepare(bytes);
         self.install(plugin, revision, prepared)
     }
+    /// Evict revisions absent from the accepted catalog, including failed loads.
+    /// Existing Store instances keep their compiled code independently.
+    pub fn retain_modules(&mut self, mut keep: impl FnMut(&PluginId, &str) -> bool) {
+        self.modules
+            .retain(|(plugin, revision), _| keep(plugin, revision));
+    }
     fn instantiate(&self, pre: &bindings::LogicPre<HostState>) -> Result<Instance, String> {
         let limiter = MemoryLimiter::new(&self.config.limits);
         let mut store = Store::new(
