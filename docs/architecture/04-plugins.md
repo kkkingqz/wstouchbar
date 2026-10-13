@@ -51,7 +51,9 @@ file = "sets/brightness.toml"
 
 Размеры задаются относительно поверхности ([16-surfaces.md](16-surfaces.md)). Число без единицы — это базовая единица `u`, по умолчанию 1 % короткой стороны поверхности (у Touch Bar — высоты). Автор набора может явно выбрать `"N%w"` или `"N%h"` для отдельного значения или переопределить `u` в разделе `[units]`. Пикселей нет, поэтому одни и те же наборы работают на Touch Bar разной длины и на других поверхностях.
 
-Привязка к состоянию: поля `*_from` (`text_from`, `value_from`, `enabled_from`, `selected_from`, `visible_from`, `symbol_from`, `canvas_from`). Узел с `visible_from = false` **не участвует** в раскладке (A7). Обработчики: `on_pressed`, `on_activate`, `on_long_pressed`, `on_value_changed`, `on_released`, `on_cancelled` — имя действия логики. Панели: `[[panels]]` с элементами, ширинами, `dismiss_on_selection` и `principal_item`, ссылки на них через `expanded_panel` и `press_and_hold_panel`. При `on_long_pressed` или `press_and_hold_panel` обязателен явно заданный положительный `hold_ms`; отсутствие или ноль отвергаются как InvalidWidget.
+Привязка к состоянию: поля `*_from` (`text_from`, `value_from`, `enabled_from`, `selected_from`, `visible_from`, `symbol_from`, `canvas_from`). Узел с `visible_from = false` **не участвует** в раскладке (A7). Обработчики: `on_pressed`, `on_activate`, `on_long_pressed`, `on_value_changed`, `on_released`, `on_cancelled` — имя действия логики. Панели: `[[panels]]` с обязательной локальной раскладкой `[panels.layout]`, ширинами, `dismiss_on_selection` и `principal_item`, ссылки на них через `expanded_panel` и `press_and_hold_panel`. При `on_long_pressed` или `press_and_hold_panel` обязателен явно заданный положительный `hold_ms`; отсутствие или ноль отвергаются как InvalidWidget.
+
+Виджеты панели используют состояние и действия одного экземпляра логики владельца (D48/D76). `principal_item` указывает на строковый `id` виджета этой панели. Старые `items` и `element.item`, ссылающиеся на другие наборы, отвергаются.
 
 Набор F-клавиш плагина `system` целиком декларативный. Esc добавляется одной строкой:
 

@@ -239,6 +239,7 @@ impl Runtime {
 - **Манифест `plugin.toml`** ([04-plugins.md](../architecture/04-plugins.md)): `id`, `version`, `api`, `name`, `description`, `logic`, `requires`, `[[sets]]`. Поддерживается только `api = "1"`.
 - **Схема набора.**
   - **Корень:** `version = 1`, `id`, `label`, `logic_config`, `persist`, `[units]`, `[layout]`, `[[panels]]`.
+  - **Панели (D76):** обязательная локальная `panels[].layout`; виджеты используют логику владельца. Старые `items`/`element.item` отвергаются.
   - **Узлы:** `row`, `column`, `stack`, `responsive`, `repeat`, `button`, `text`, `icon`, `image`, `slider`, `meter`, `progress`, `scrubber`, `canvas`, `shader-effect`, `fixed-space`, `flexible-space`, `key`, `key-row`.
   - **Привязки к состоянию** `*_from` и обработчики `on_*`.
   - **Размеры** — `Length` (`u`, `%w`, `%h`).

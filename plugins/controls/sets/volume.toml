@@ -1,0 +1,46 @@
+version = 1
+id = "volume"
+label = "Volume"
+logic_config = "volume"
+[layout]
+kind = "button"
+id = "volume-panel"
+enabled_from = "available"
+expanded_panel = "volume-controls"
+press_and_hold_panel = "volume-controls"
+hold_ms = 420
+[[layout.children]]
+kind = "row"
+spacing = 8
+[[layout.children.children]]
+kind = "icon"
+symbol_from = "volume_icon"
+[[layout.children.children]]
+kind = "text"
+text_from = "volume_text"
+[[panels]]
+id = "volume-controls"
+principal_item = "volume-slider"
+minimum_width = 280
+preferred_width = 360
+maximum_width = 560
+dismiss_on_selection = false
+[panels.layout]
+kind = "row"
+spacing = 8
+[[panels.layout.children]]
+kind = "slider"
+id = "volume-slider"
+value_from = "volume"
+enabled_from = "available"
+on_pressed = "volume-change"
+on_value_changed = "volume-change"
+on_released = "volume-change"
+on_cancelled = "volume-change"
+[[panels.layout.children]]
+kind = "button"
+id = "microphone-toggle"
+selected_from = "microphone_muted"
+enabled_from = "microphone_available"
+on_activate = "microphone-toggle"
+symbol = "microphone"

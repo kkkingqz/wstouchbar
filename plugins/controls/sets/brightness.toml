@@ -1,0 +1,22 @@
+version = 1
+id = "brightness"
+label = "Brightness"
+logic_config = "brightness"
+[layout]
+kind = "row"
+spacing = 8
+[[layout.children]]
+kind = "icon"
+symbol = "brightness"
+[[layout.children]]
+kind = "text"
+text_from = "brightness_text"
+[[layout.children]]
+kind = "slider"
+id = "brightness-slider"
+value_from = "brightness"
+enabled_from = "available"
+on_pressed = "brightness-change"
+on_value_changed = "brightness-change"
+on_released = "brightness-change"
+on_cancelled = "brightness-change"

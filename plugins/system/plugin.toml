@@ -1,0 +1,9 @@
+id = "system"
+version = "1.0.0"
+api = "1"
+name = "System Keys"
+description = "Declarative function keys"
+requires = []
+[[sets]]
+id = "fkeys"
+file = "sets/fkeys.toml"

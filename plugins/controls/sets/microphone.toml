@@ -1,0 +1,11 @@
+version = 1
+id = "microphone"
+label = "Microphone"
+logic_config = "microphone"
+[layout]
+kind = "button"
+id = "microphone-toggle"
+selected_from = "microphone_muted"
+enabled_from = "microphone_available"
+on_activate = "microphone-toggle"
+symbol = "microphone"
