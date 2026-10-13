@@ -1,0 +1,101 @@
+# Приёмка этапа 2
+
+Дата: 2026-10-13. План: [stage-2-logic.md](../plans/stage-2-logic.md), L1–L13.
+
+## Проверенный код и среда
+
+L1–L12 — коммит `7c64dc2` ветки `stage-2-logic`. Отдельный свежий локальный
+клон создан `git clone --no-local --branch stage-2-logic /source /src`:
+без target, готовых wasm-файлов и Cargo/Rustup-кеша рабочего каталога.
+Контейнер `docker.io/library/ubuntu:26.04` (`6e92c4fd8dfd`),
+Ubuntu 26.04.1 LTS, x86_64. Rust установлен официальным rustup:
+rustc 1.98.1, cargo 1.98.1, rustfmt, clippy, wasm32-unknown-unknown.
+Системные зависимости — build-essential, ca-certificates, curl, git и pkg-config.
+
+Обычный `cargo test --workspace --locked` сам собрал 11 компонентов через
+вложенный cargo и wit-component. `TOUCHBAR_WASM_FIXTURES` не задавался.
+После первого чистого прохода команды повторены в том же клоне; повторная
+обёртка завершилась с кодом 0. Для проверки нового примера замеров в клон
+добавлен только `examples/controls_benchmark.rs`; код библиотеки не менялся.
+
+Длинные проверки и замеры выполнены в Ubuntu 26.04 с тем же Rust и lockfile,
+в рабочем checkout. Wasmtime 49.0.2, wit-bindgen 0.62.0,
+wit-component/wit-parser 0.261.0, TOML 1.1.8+spec-1.1.0.
+
+## Результаты
+
+| Проверка | Результат |
+|---|---|
+| Свежий клон: cargo test --workspace --locked, PROPTEST_CASES=2000 | 519 тестов, 0 ошибок; 1 явно игнорируемый benchmark ядра |
+| cargo fmt --all --check | пройдена |
+| cargo clippy --workspace --all-targets --locked -- -D warnings | пройдена, включая пример замеров |
+| Все 14 сценариев controls L12 | пройдены с I1–I12 на каждом входе и JSON replay |
+| Модульные правила controls | 7 тестов пройдены на настоящем компоненте |
+| Trap, hang/epoch, OOM, stack overflow, бюджет, журнал, Err | пройдены; соседние экземпляры продолжают работать |
+| Echo events и updates | по 100000 генеративных случаев, без потери данных |
+| I1–I12 с настоящим controls | 10000 последовательностей, без нарушений, JSON replay совпадает |
+| Свойства этапа 1, PROPTEST_CASES=100000 | 517 тестов, 0 ошибок; I1–I12 без нарушений |
+
+В controls-прогоне наблюдались панели в 5281 случае (52,81%), Pending —
+в 3484 (34,84%), Faulted — в 4769 (47,69%). Каждый показатель выше требуемых 5%.
+Общий генератор этапа 1 выполнил 100002 последовательности (100000 новых
+и два сохранённых seeds): Panel — 55946 (55,94%), Pending — 37036 (37,04%),
+Faulted — 61799 (61,80%). В release 517 тестов: две проверки debug-бюджета
+SDK компилируются только при debug_assertions.
+
+Каждый случай начинает с успешной инициализации настоящих controls,
+завершает все захваты и клавиши; guest Stores не переносятся между случаями.
+
+## Замеры controls
+
+Команда:
+
+```sh
+cargo run -p touchbar-logic-runtime --example controls_benchmark --release --locked
+```
+
+Intel Core i7-9750H, x86_64; замеры выполнялись на фоне приёмочных тестов.
+Это информационные результаты одного прогона, без порога приёмки.
+Время измеряет хост через Instant; оно не передаётся логике вместо Timestamp.
+
+| Операция | Результат |
+|---|---|
+| Размер компонента | 175558 байт (171,44 КиБ) |
+| load_module без кеша | 209,822 мс |
+| load_module с пустым кешем | 211,033 мс |
+| load_module с прогретым встроенным кешем, новый Runtime | 2,284 мс |
+| Первое create, с describe | 0,205 мс |
+| create после кеширования describe, без init, 100 образцов | медиана 0,018599 мс; p99 0,057936 мс |
+| handle для audio SubscriptionData, 1000 образцов после 100 прогревочных | медиана 0,005430 мс; p99 0,018888 мс |
+
+Пример создаёт отдельный временный каталог кеша под target, использует новый
+Runtime для загрузки прогретого кеша и удаляет каталог после измерения.
+Backend, рендер и эффекты не входят в эти числа. Init выполняется перед
+измерением handle; создание экземпляра измеряется отдельно от init.
+
+## Повторение
+
+```sh
+rustup show
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+PROPTEST_CASES=2000 PROPTEST_CONTROLS_CASES=200 cargo test --workspace --locked
+PROPTEST_CASES=100000 PROPTEST_CONTROLS_CASES=10000 cargo test --workspace --release --locked -- --nocapture
+```
+
+В CI controls использует 200 случаев, proptest-long — 10000.
+`PROPTEST_CONTROLS_CASES` читает controls-тест отдельно от общей переменной
+PROPTEST_CASES; остальные proptest-тесты могут вывести сообщение о том,
+что дополнительная переменная им неизвестна, и выполняют своё число случаев.
+
+## Границы этапа
+
+Готовы WIT v1, SDK на типах модели, синхронный runtime с изоляцией и лимитами,
+сохранение состояния, строгие документы наборов, реальный wasm в testkit,
+три набора controls и их тесты. Отдельная логика controls находится в
+plugins/controls/src/logic.rs, экспорт компонента — в lib.rs, раскладки —
+в трёх файлах sets. F-клавиши остаются декларативным набором system.
+
+UI-дерево, выбор responsive-варианта и рендер относятся к этапу 3.
+Настоящие audio/desktop-исполнители, процессы сессии и touchbard,
+протокол, GNOME и испытания на железе относятся к следующим этапам.

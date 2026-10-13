@@ -25,6 +25,7 @@ jobs:
       - run: cargo test --workspace --locked
         env:
           PROPTEST_CASES: '2000'
+          PROPTEST_CONTROLS_CASES: '200'
 
   proptest-long:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -39,3 +40,4 @@ jobs:
       - run: cargo test --workspace --release --locked
         env:
           PROPTEST_CASES: '100000'
+          PROPTEST_CONTROLS_CASES: '10000'

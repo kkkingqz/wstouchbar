@@ -101,3 +101,39 @@ Pressed → Cancelled → Hidden при занятом слоте вызова. 
 сохранение запрета через checkpoint и отсутствие влияния на другое касание.
 Persistent после обычного Up остаётся разрешённым. Harness-сценарий cleanup
 дополнительно проходит проверку инвариантов и JSON replay.
+
+## Логика и наборы этапа 2
+
+`ModuleTester` запускает настоящий wasm без ядра:
+
+```rust
+use touchbar_testkit::*;
+use touchbar_model::*;
+
+let mut module = ModuleTester::load(touchbar_wasm_fixtures::CONTROLS);
+module.init("volume", vec![])
+    .handle(audio_data("sink", 1.25, false))
+    .expect_state("volume", 1.0)
+    .expect_state("volume_text", "125%");
+module.handle(action("volume-level", ActionKind::ValueChanged, 0.7))
+    .expect_request(|r| r.coalesce.as_deref() == Some("volume"));
+```
+
+`state` содержит объединённые поля, `update` — последний частичный ответ. Каждый init создаёт новый гостевой экземпляр, без старых глобальных переменных. `advance_ms` меняет время вызова. Ответы ошибок доступны в `input`.
+
+`plugin_dir(path)` читает manifest и наборы, вычисляет revision по их содержимому и компоненту. Если logic.wasm отсутствует, тестовый loader использует соответствующую компонентную фикстуру. `WasmLogic::register_plugin` кеширует модуль и сверяет все привязки с describe; каталог активируется отдельным `Input::Catalog`. В каталог теста добавляются профили и bindings. Незарегистрированные плагины обслуживает `WasmLogic::fallback`.
+
+DSL принимает `.logic(WasmLogic)`, `.drag(widget, from, to, duration_ms, steps)` и `.subscription_data(set, tag, data)`. Для двух поверхностей используется subscription_data_on. Данные доставляются всем активным экземплярам указанного набора и tag на выбранной поверхности.
+
+Все 14 сценариев L12 находятся в [controls_scenarios.rs](../crates/touchbar-testkit/tests/controls_scenarios.rs); правила логики — в [controls_module.rs](../crates/touchbar-testkit/tests/controls_module.rs). Каждый сценарий проверяет I1–I12 на каждом входе, завершает захваты и сравнивает JSON replay.
+
+```sh
+cargo test -p touchbar-testkit --test controls_module --test controls_sets --test controls_scenarios --locked
+PROPTEST_CONTROLS_CASES=10000 cargo test -p touchbar-testkit --test controls_properties --release --locked -- --nocapture
+PROPTEST_CASES=100000 cargo test --workspace --release --locked -- --nocapture
+cargo run -p touchbar-logic-runtime --example controls_benchmark --release --locked
+```
+
+controls_properties использует те же GeneratedScenario/GeneratedStep, что этап 1, с настоящим модулем и поддельными эффектами. Runtime переиспользуется между случаями для кеша компиляции; все гостевые экземпляры уничтожаются при удалении поверхностей. Тест отдельно требует успешной инициализации controls, проверяет долю Panel/Pending/Faulted и JSON replay. Смена ревизии на несовместимый hang и действия через совместимый trap проверяют fault paths.
+
+В длинном CI обе переменные заданы явно: PROPTEST_CASES=100000, PROPTEST_CONTROLS_CASES=10000. Они независимы, поэтому можно увеличить число быстрых свойств без случайного увеличения дорогого controls-прогона. Замеры и результаты — [приёмка этапа 2](validation/stage-2.md).
