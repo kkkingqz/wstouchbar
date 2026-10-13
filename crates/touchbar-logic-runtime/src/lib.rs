@@ -15,11 +15,6 @@ pub use persist::*;
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 use touchbar_core::{Input, PersistKey};
@@ -138,37 +133,8 @@ struct Instance {
     store: Store<HostState>,
     api: bindings::Logic,
 }
-struct EpochTicker {
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-impl EpochTicker {
-    fn new(engine: Engine) -> Result<Self, RuntimeError> {
-        let stop = Arc::new(AtomicBool::new(false));
-        let running = stop.clone();
-        let thread = thread::Builder::new()
-            .name("touchbar-wasm-epoch".into())
-            .spawn(move || {
-                while !running.load(Ordering::Relaxed) {
-                    thread::sleep(Duration::from_millis(1));
-                    engine.increment_epoch();
-                }
-            })
-            .map_err(|e| RuntimeError(e.to_string()))?;
-        Ok(Self {
-            stop,
-            thread: Some(thread),
-        })
-    }
-}
-impl Drop for EpochTicker {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
+mod epoch;
+use epoch::EpochTicker;
 pub struct Runtime {
     engine: Engine,
     linker: Linker<HostState>,
@@ -177,7 +143,7 @@ pub struct Runtime {
     instances: BTreeMap<InstanceId, Instance>,
     persist: Box<dyn PersistStore>,
     logs: Vec<LogRecord>,
-    _ticker: EpochTicker,
+    ticker: EpochTicker,
 }
 impl Runtime {
     pub fn new(
@@ -212,7 +178,7 @@ impl Runtime {
             instances: BTreeMap::new(),
             persist,
             logs: vec![],
-            _ticker: ticker,
+            ticker,
         })
     }
     pub fn load_module(
@@ -303,6 +269,7 @@ impl Runtime {
                 reason: "instance already exists".into(),
             };
         }
+        let _active = self.ticker.enter();
         let outcome = (|| {
             let module = self
                 .modules
@@ -395,6 +362,7 @@ impl Runtime {
                 duration: start.elapsed(),
             };
         };
+        let _active = self.ticker.enter();
         live.store.data_mut().reset_call();
         live.store
             .set_epoch_deadline(self.config.limits.logic_hard_ms.max(1));
