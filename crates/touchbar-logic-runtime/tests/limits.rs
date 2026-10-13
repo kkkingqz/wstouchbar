@@ -168,7 +168,7 @@ fn real_traps_timeouts_memory_and_stack_faults_are_isolated() {
     }
 }
 #[test]
-fn oversized_updates_and_calls_fault_without_affecting_neighbor() {
+fn oversized_updates_fault_but_host_inputs_preserve_instances() {
     let mut r = runtime(LogicLimits {
         max_update_bytes: 4096,
         ..limits()
@@ -177,12 +177,12 @@ fn oversized_updates_and_calls_fault_without_affecting_neighbor() {
     create(&mut r, 2, "echo", f::ECHO);
     fault(init(&mut r, 1, ""), "budget");
     success(init(&mut r, 2, ""));
-    fault(init(&mut r, 2, &"x".repeat(5000)), "budget");
+    let rejected = init(&mut r, 2, &"x".repeat(5000));
     assert!(
-        call(&mut r, 2, LogicCall::Handle(LogicEvent::Shown))
-            .input
-            .is_none()
+        matches!(rejected.input, Some(Input::LogicError { ref message, .. }) if message.contains("host input budget"))
     );
+    assert!(rejected.logs.iter().any(|l| l.level == LogLevel::Error));
+    success(call(&mut r, 2, LogicCall::Handle(LogicEvent::Shown)));
     create(&mut r, 3, "echo", f::ECHO);
     success(init(&mut r, 3, ""));
     success(call(&mut r, 3, LogicCall::Handle(LogicEvent::Shown)));

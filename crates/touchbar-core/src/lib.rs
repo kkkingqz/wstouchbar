@@ -510,7 +510,7 @@ impl Core {
             }
             Input::Catalog(catalog) => {
                 let issues = catalog.validate();
-                let invalid = issues
+                let mut invalid = issues
                     .iter()
                     .any(|i| i.code != CatalogIssueCode::ProfileConflict);
                 for issue in issues {
@@ -518,6 +518,17 @@ impl Core {
                         &mut output,
                         &format!("{}: {}", issue.location, issue.detail),
                     );
+                }
+                for set in &catalog.sets {
+                    if touchbar_logic_types::wire_size_init(&set.logic_config, &vec![])
+                        > self.config.max_update_bytes
+                    {
+                        warn(
+                            &mut output,
+                            &format!("{}: configuration exceeds Init budget", set.reference),
+                        );
+                        invalid = true;
+                    }
                 }
                 if !invalid {
                     let changed = self.catalog.bindings != catalog.bindings;
@@ -674,14 +685,14 @@ impl Core {
                 code,
                 phase,
             } => self.key_input(source, code, phase, &mut output),
-            Input::EffectDone { request, result } => self.effect_done(request, result),
+            Input::EffectDone { request, result } => self.effect_done(request, result, &mut output),
             Input::SubscriptionData { subscription, data } => {
                 self.subscription_data(subscription, data, &mut output)
             }
             Input::SubscriptionLost {
                 subscription,
                 error,
-            } => self.subscription_lost(subscription, error),
+            } => self.subscription_lost(subscription, error, &mut output),
         }
         self.watch_binding_keys(&mut output);
         self.sync_binding_timers();

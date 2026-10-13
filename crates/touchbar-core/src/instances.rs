@@ -152,7 +152,7 @@ impl Instance {
         if let Err(reason) = validate_description(&self.set, &description) {
             return self.fail(now, reason, false, config);
         }
-        let persisted = persisted
+        let mut persisted: StatePatch = persisted
             .into_iter()
             .filter(|(name, value)| {
                 description
@@ -162,6 +162,16 @@ impl Instance {
                     && value_within_limits(value, config)
             })
             .collect();
+        let mut output = vec![];
+        if touchbar_logic_types::wire_size_init(&self.set.logic_config, &persisted)
+            > config.max_update_bytes
+        {
+            persisted.clear();
+            crate::warn(
+                &mut output,
+                "restored state discarded: Init exceeds input budget",
+            );
+        }
         self.description = Some(description);
         self.queue.push_back(QueuedCall {
             invocation: LogicCall::Init {
@@ -170,7 +180,7 @@ impl Instance {
             },
             physical: None,
         });
-        vec![]
+        output
     }
     pub fn context_changed(&mut self, context: LogicContext) {
         if self.set.logic.is_none()

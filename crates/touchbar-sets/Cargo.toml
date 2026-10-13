@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 touchbar-model.workspace = true
+touchbar-logic-types.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true

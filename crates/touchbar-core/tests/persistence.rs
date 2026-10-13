@@ -460,3 +460,61 @@ fn different_sets_in_same_profile_slot_never_share_persisted_fields() {
         "{init:?}"
     );
 }
+
+#[test]
+fn oversized_restored_init_resets_whole_state_and_retains_config() {
+    let mut c = Core::new(CoreConfig::default());
+    let mut cat = catalog();
+    cat.sets[0].logic_config = "x".repeat(256 * 1024 - 100);
+    c.handle(Timestamp(0), Input::Catalog(cat.clone()));
+    let out = c.handle(Timestamp(0), Input::SurfaceAdded(info(1)));
+    let id = out
+        .iter()
+        .find_map(|o| match o {
+            Output::CreateInstance { instance, .. } => Some(*instance),
+            _ => None,
+        })
+        .unwrap();
+    let out = describe(
+        &mut c,
+        id,
+        0,
+        vec![
+            ("level".into(), number(1.0)),
+            (
+                "text".into(),
+                StateValue::Scalar(Scalar::Text("restored".into())),
+            ),
+        ],
+    );
+    assert!(out.iter().any(|o| matches!(o, Output::CallLogic {invocation: LogicCall::Init {config, persisted}, ..} if config == &cat.sets[0].logic_config && persisted.is_empty())));
+    assert!(
+        out.iter()
+            .any(|o| matches!(o, Output::Log {event, ..} if event.contains("restored state")))
+    );
+}
+#[test]
+fn catalog_config_budget_includes_init_overhead_and_preserves_previous_catalog() {
+    let mut c = Core::new(CoreConfig {
+        max_update_bytes: 4096,
+        ..CoreConfig::default()
+    });
+    c.handle(Timestamp(0), Input::Catalog(catalog()));
+    let mut cat = catalog();
+    cat.sets[0].logic_config = "x".repeat(4096);
+    let out = c.handle(Timestamp(1), Input::Catalog(cat));
+    assert!(
+        out.iter()
+            .any(|o| matches!(o, Output::Log {event, ..} if event.contains("configuration")))
+    );
+    let out = c.handle(Timestamp(2), Input::SurfaceAdded(info(1)));
+    let id = out
+        .iter()
+        .find_map(|o| match o {
+            Output::CreateInstance { instance, .. } => Some(*instance),
+            _ => None,
+        })
+        .unwrap();
+    let out = describe(&mut c, id, 2, vec![]);
+    assert!(out.iter().any(|o| matches!(o, Output::CallLogic {invocation:LogicCall::Init {config,..}, ..} if config.is_empty())));
+}

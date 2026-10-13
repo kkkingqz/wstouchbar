@@ -372,14 +372,17 @@ impl Runtime {
             && let Err(error) =
                 touchbar_logic_types::check_call_budget(invocation, &self.config.limits)
         {
-            self.instances.remove(&instance);
+            let message = format!("host input budget: {error}");
             return CallResponse {
-                input: Some(Input::LogicFault {
+                input: Some(Input::LogicError {
                     instance,
                     call,
-                    reason: format!("budget: call: {error}"),
+                    message: message.clone(),
                 }),
-                logs: vec![],
+                logs: vec![LogRecord {
+                    level: LogLevel::Error,
+                    message,
+                }],
                 duration: start.elapsed(),
             };
         }

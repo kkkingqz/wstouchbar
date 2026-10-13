@@ -1402,6 +1402,7 @@ dependencies = [
  "serde_path_to_error",
  "thiserror 2.0.21",
  "toml",
+ "touchbar-logic-types",
  "touchbar-model",
 ]
 

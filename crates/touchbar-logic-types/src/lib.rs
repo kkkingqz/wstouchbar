@@ -111,11 +111,30 @@ pub fn check_budget(update: &LogicUpdate, limits: &LogicLimits) -> Result<(), Bu
 /// Estimate inputs before allocating their WIT representation, using the same global budget.
 pub fn wire_size_call(call: &LogicCall) -> usize {
     match call {
-        LogicCall::Init { config, persisted } => {
-            total([64, text(config), state_patch_size(persisted)])
-        }
-        LogicCall::Handle(event) => total([64, event_size(event)]),
+        LogicCall::Init { config, persisted } => wire_size_init(config, persisted),
+        LogicCall::Handle(event) => wire_size_event(event),
     }
+}
+/// Full Init envelope, usable before constructing a call.
+pub fn wire_size_init(config: &str, persisted: &StatePatch) -> usize {
+    total([64, text(config), state_patch_size(persisted)])
+}
+/// Full Handle envelope, including tag and payload.
+pub fn wire_size_event(event: &LogicEvent) -> usize {
+    total([64, event_size(event)])
+}
+/// Worst-case spawn completion with max_output bytes in each stream.
+pub fn wire_size_spawn_result(tag: &str, max_output: u32) -> usize {
+    wire_size_event(&LogicEvent::EffectDone {
+        tag: tag.into(),
+        result: Ok(EffectResult::Spawn(SpawnResult {
+            status: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            truncated: false,
+        })),
+    })
+    .saturating_add((max_output as usize).saturating_mul(2))
 }
 pub fn check_call_budget(call: &LogicCall, limits: &LogicLimits) -> Result<(), BudgetExceeded> {
     let actual = wire_size_call(call);

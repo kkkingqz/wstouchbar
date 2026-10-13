@@ -137,7 +137,8 @@ impl SetFile {
             "label exceeds text budget",
         )?;
         check(
-            self.logic_config.len() <= 256 * 1024,
+            touchbar_logic_types::wire_size_init(&self.logic_config, &vec![])
+                <= touchbar_logic_types::LogicLimits::default().max_update_bytes,
             "logic_config",
             "configuration too large",
         )?;

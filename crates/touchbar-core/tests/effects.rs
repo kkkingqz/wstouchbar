@@ -1362,3 +1362,96 @@ fn hidden_requests_are_rejected_without_a_completion_retry_loop() {
         assert_eq!(c.snapshot().requests[0].tag, "background-write");
     }
 }
+
+#[test]
+fn oversized_fact_subscription_is_lost_without_faulting_instance() {
+    let (mut c, instance) = setup(CoreConfig::default());
+    let out = submit(
+        &mut c,
+        1,
+        LogicUpdate {
+            subscriptions: Some(vec![SubscriptionSpec {
+                tag: "fact".into(),
+                kind: SubscriptionKind::DesktopFact {
+                    name: FactName("large".into()),
+                },
+                background: false,
+            }]),
+            ..LogicUpdate::default()
+        },
+    );
+    let subscription = subscriptions(&out)[0];
+    let out = c.handle(
+        Timestamp(2),
+        Input::SubscriptionData {
+            subscription,
+            data: SubscriptionData::Fact(Some(FactValue::List(vec!["x".repeat(3072); 100]))),
+        },
+    );
+    assert!(out.contains(&Output::Unsubscribe { subscription }));
+    assert!(
+        matches!(call(&out).unwrap().2, LogicCall::Handle(LogicEvent::SubscriptionLost { error: EffectError::Failed(ref s), .. }) if s == "too large")
+    );
+    assert!(
+        out.iter()
+            .any(|o| matches!(o, Output::Log { event, .. } if event.contains("budget")))
+    );
+    drain(&mut c, 2, out);
+    assert_eq!(c.snapshot().instances[0].id, instance);
+    assert_eq!(c.snapshot().instances[0].status, InstanceStatus::Visible);
+}
+#[test]
+fn oversized_effect_result_is_replaced_with_small_failure() {
+    let (mut c, _) = setup(CoreConfig::default());
+    let out = submit(
+        &mut c,
+        1,
+        LogicUpdate {
+            requests: vec![req(
+                "run",
+                Effect::SpawnRun(SpawnSpec::new(vec!["test".into()])),
+            )],
+            ..LogicUpdate::default()
+        },
+    );
+    let request = starts(&out)[0].0;
+    let out = c.handle(
+        Timestamp(2),
+        Input::EffectDone {
+            request,
+            result: Ok(EffectResult::Spawn(SpawnResult {
+                status: 0,
+                stdout: "x".repeat(300 * 1024),
+                stderr: String::new(),
+                truncated: false,
+            })),
+        },
+    );
+    assert!(
+        matches!(call(&out).unwrap().2, LogicCall::Handle(LogicEvent::EffectDone { result: Err(EffectError::Failed(ref s)), .. }) if s == "too large")
+    );
+    drain(&mut c, 2, out);
+    assert!(c.snapshot().requests.is_empty());
+    assert_eq!(c.snapshot().instances[0].status, InstanceStatus::Visible);
+}
+#[test]
+fn spawn_output_budget_is_checked_before_admission() {
+    let (mut c, _) = setup(CoreConfig::default());
+    let mut spawn = SpawnSpec::new(vec!["test".into()]);
+    spawn.max_output = u32::MAX;
+    let out = submit(
+        &mut c,
+        1,
+        LogicUpdate {
+            requests: vec![req("run", Effect::SpawnRun(spawn.clone()))],
+            subscriptions: Some(vec![SubscriptionSpec {
+                tag: "lines".into(),
+                kind: SubscriptionKind::SpawnLines(spawn),
+                background: false,
+            }]),
+            ..LogicUpdate::default()
+        },
+    );
+    assert!(starts(&out).is_empty());
+    assert!(subscriptions(&out).is_empty());
+}

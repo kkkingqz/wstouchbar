@@ -917,3 +917,13 @@ fn manifest_paths_dependencies_and_duplicate_sets_are_checked() {
         assert_eq!(error.path, path, "{error}");
     }
 }
+
+#[test]
+fn configuration_budget_includes_init_envelope() {
+    let mut file = parse("[layout]\nkind='text'");
+    file.logic_config = "x".repeat(256 * 1024);
+    let error = file.validate().unwrap_err();
+    assert_eq!(error.path, "logic_config");
+    file.logic_config.truncate(256 * 1024 - 72);
+    file.validate().unwrap();
+}
