@@ -100,6 +100,30 @@ invalid!(
     "slider"
 );
 invalid!(
+    selected_requires_scrubber,
+    "[layout]\nkind='button'\nid='b'\non_selected='choose'",
+    "layout.on_selected",
+    "scrubber"
+);
+#[test]
+fn selected_handler_checks_declared_action_and_kind() {
+    use touchbar_model::{ActionDescription, LogicDescription};
+    let source = set("[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'");
+    for kinds in [None, Some(vec![ActionKind::Activated])] {
+        let description = LogicDescription {
+            actions: kinds
+                .map(|kinds| vec![("choose".into(), ActionDescription { kinds, value: None })])
+                .unwrap_or_default(),
+            state: vec![],
+        };
+        let error =
+            SetFile::from_toml_with_description("picker.toml", &source, &description).unwrap_err();
+        assert_eq!(error.path, "layout.on_selected");
+        assert_eq!(error.line, 7);
+        assert!(!error.message.contains("unknown field"), "{error}");
+    }
+}
+invalid!(
     invalid_action_name,
     "[layout]\nkind='button'\nid='b'\non_activate='../go'",
     "layout.on_activate",

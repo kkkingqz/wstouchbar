@@ -116,7 +116,7 @@ impl HostState {
     fn reset_call(&mut self) {
         self.logs.clear();
         self.dropped = 0;
-        self.limiter.denied = false;
+        self.limiter.denied = None;
     }
     fn take_logs(&mut self) -> Vec<LogRecord> {
         let mut logs = std::mem::take(&mut self.logs);
@@ -410,7 +410,7 @@ impl Runtime {
             ),
         };
         let mut logs = live.store.data_mut().take_logs();
-        let memory_denied = live.store.data().limiter.denied;
+        let allocation_denied = live.store.data().limiter.denied;
         let input = match result {
             Ok(Ok(wire)) => {
                 let update = translation::update_from(wire);
@@ -441,7 +441,7 @@ impl Runtime {
                 Input::LogicFault {
                     instance,
                     call,
-                    reason: fault_reason(&error, memory_denied),
+                    reason: fault_reason(&error, allocation_denied),
                 }
             }
         };

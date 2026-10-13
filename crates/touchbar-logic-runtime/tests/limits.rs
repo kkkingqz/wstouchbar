@@ -3,6 +3,64 @@ use touchbar_logic_runtime::*;
 use touchbar_logic_types::LogicLimits;
 use touchbar_model::*;
 use touchbar_wasm_fixtures as f;
+#[path = "support/tables.rs"]
+mod tables;
+
+#[test]
+fn real_component_table_allocations_are_bounded_and_neighbor_survives() {
+    table_case(700, false);
+}
+#[test]
+fn real_component_table_growth_is_bounded_and_neighbor_survives() {
+    table_case(0, true);
+}
+fn table_case(initial: u64, grow: bool) {
+    let mut r = runtime(LogicLimits {
+        max_table_elements: 1024,
+        ..limits()
+    });
+    let plugin: PluginId = "tables".parse().unwrap();
+    r.load_module(plugin.clone(), "1", &tables::component(initial, grow))
+        .unwrap();
+    create(&mut r, 2, "good", f::ECHO);
+    success(init(&mut r, 2, ""));
+    let set = "owner/test".parse().unwrap();
+    let key = PersistKey {
+        plugin: "owner".parse().unwrap(),
+        surface: "touchbar".parse().unwrap(),
+        scope: PersistScope::Layer(set),
+    };
+    let described = r.create(
+        Timestamp(0),
+        id(1),
+        &plugin,
+        "1",
+        &"owner/test".parse().unwrap(),
+        &key,
+    );
+    if grow {
+        assert!(
+            matches!(described, Input::LogicDescribed { .. }),
+            "{described:?}"
+        );
+        success(init(&mut r, 1, ""));
+        fault(
+            call(&mut r, 1, LogicCall::Handle(LogicEvent::Shown)),
+            "table",
+        );
+    } else {
+        assert!(
+            matches!(described, Input::InstanceFault { ref reason, .. } if reason.starts_with("table")),
+            "{described:?}"
+        );
+    }
+    assert!(
+        call(&mut r, 1, LogicCall::Handle(LogicEvent::Shown))
+            .input
+            .is_none()
+    );
+    success(call(&mut r, 2, LogicCall::Handle(LogicEvent::Shown)));
+}
 fn id(n: u64) -> InstanceId {
     InstanceId {
         number: n,

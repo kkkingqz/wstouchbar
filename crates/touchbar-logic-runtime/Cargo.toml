@@ -29,3 +29,5 @@ match_same_arms = "warn"
 touchbar-wasm-fixtures.workspace = true
 touchbar-testkit = { path = "../touchbar-testkit" }
 proptest.workspace = true
+wasmparser = "0.261.0"
+wasm-encoder = { version = "0.261.0", features = ["wasmparser"] }

@@ -143,6 +143,7 @@ pub struct LayoutNode {
     pub on_activate: Option<String>,
     pub on_long_pressed: Option<String>,
     pub on_value_changed: Option<String>,
+    pub on_selected: Option<String>,
     pub on_released: Option<String>,
     pub on_cancelled: Option<String>,
     pub repeat_from: Option<String>,

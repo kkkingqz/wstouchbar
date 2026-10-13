@@ -242,6 +242,7 @@ impl LayoutNode {
                 ActionKind::ValueChanged,
             ),
             ("on_released", &self.on_released, ActionKind::Released),
+            ("on_selected", &self.on_selected, ActionKind::Selected),
             ("on_cancelled", &self.on_cancelled, ActionKind::Cancelled),
         ]
         .into_iter()
@@ -457,6 +458,13 @@ fn validate_node(
                 matches!(node.kind, LayoutKind::Slider | LayoutKind::Scrubber),
                 &field(path, n),
                 "ValueChanged requires slider or scrubber",
+            )?;
+        }
+        if k == ActionKind::Selected {
+            check(
+                node.kind == LayoutKind::Scrubber,
+                &field(path, n),
+                "Selected requires scrubber",
             )?;
         }
         name(a, &field(path, n))?;

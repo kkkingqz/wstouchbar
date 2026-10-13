@@ -1358,6 +1358,8 @@ dependencies = [
  "touchbar-model",
  "touchbar-testkit",
  "touchbar-wasm-fixtures",
+ "wasm-encoder 0.261.0",
+ "wasmparser 0.261.0",
  "wasmtime",
 ]
 
@@ -1566,6 +1568,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
  "semver",
+ "serde",
 ]
 
 [[package]]
