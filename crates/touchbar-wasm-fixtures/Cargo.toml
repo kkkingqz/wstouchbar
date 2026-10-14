@@ -1,0 +1,19 @@
+[package]
+name = "touchbar-wasm-fixtures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[build-dependencies]
+wit-component.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+wit-component.workspace = true
+wit-parser.workspace = true

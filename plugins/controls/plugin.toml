@@ -1,0 +1,16 @@
+id = "controls"
+version = "1.0.0"
+api = "1"
+name = "System Controls"
+description = "Volume, brightness and microphone"
+logic = "logic.wasm"
+requires = []
+[[sets]]
+id = "volume"
+file = "sets/volume.toml"
+[[sets]]
+id = "brightness"
+file = "sets/brightness.toml"
+[[sets]]
+id = "microphone"
+file = "sets/microphone.toml"

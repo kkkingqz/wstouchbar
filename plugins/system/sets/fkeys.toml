@@ -1,0 +1,12 @@
+version = 1
+id = "fkeys"
+label = "Function keys"
+
+[layout]
+kind = "key-row"
+keys = [
+  # { key = "esc", width = 150 },
+  { key = "f1" }, { key = "f2" }, { key = "f3" }, { key = "f4" },
+  { key = "f5" }, { key = "f6" }, { key = "f7" }, { key = "f8" },
+  { key = "f9" }, { key = "f10" }, { key = "f11" }, { key = "f12" },
+]

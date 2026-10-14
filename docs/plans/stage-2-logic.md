@@ -161,7 +161,7 @@ touchbar_logic_sdk::export!(Controls);
 impl Runtime {
     pub fn new(config: RuntimeConfig, store: Box<dyn PersistStore>) -> Result<Self, RuntimeError>;
     pub fn load_module(&mut self, plugin: PluginId, revision: &str, bytes: &[u8]) -> Result<(), LoadError>;
-    pub fn create(&mut self, now: Timestamp, instance: InstanceId, plugin: &PluginId,
+    pub fn create(&mut self, now: Timestamp, instance: InstanceId, plugin: &PluginId, revision: &str,
                   set: &SetRef, persist_key: &PersistKey) -> Input;      // LogicDescribed | InstanceFault
     pub fn call(&mut self, now: Timestamp, instance: InstanceId, call: CallId,
                 invocation: &LogicCall) -> CallResponse;                  // Input + журнал + длительность
@@ -180,7 +180,7 @@ impl Runtime {
   - небольшой `memory_reservation`, чтобы много экземпляров не занимали адресное пространство;
   - кеш по уточнению 5.
 - **Модули.**
-  - **Компиляция и проверка.** `load_module` компилирует модуль, требует точное имя экспорта `wstouchbar:logic/api@1.0.0`, сверяет типы интерфейса с биндингами v1 и проверяет импорты (уточнение 4). Модуль хранится по `(plugin, revision)`.
+  - **Компиляция и проверка.** `load_module` компилирует модуль, требует точное имя экспорта `wstouchbar:logic/api@1.0.0`, сверяет типы интерфейса с биндингами v1 и проверяет импорты (уточнение 4). Модуль хранится по `(plugin, revision)`. Загрузка лишь кеширует его; `create` получает ревизию из принятого каталога (D73), поэтому неудачная перезагрузка не активирует новую логику.
   - **Новая ревизия.** Существующие экземпляры держат прежний компонент до уничтожения.
   - **`describe`** вызывается один раз на модуль, результат кешируется.
 - **Экземпляры.**
@@ -190,7 +190,7 @@ impl Runtime {
 - **Вызовы.**
   - **Перевод.** `call` переводит `LogicCall` в `init` или `handle`, а ответ — в `LogicUpdate`, `LogicError` или `LogicFault` с исходным `CallId`.
   - **Журнал гостя** возвращается данными в `CallResponse`, отправку в journald делает оболочка на этапе 3.
-- **Поток.** Вызовы синхронные, в потоке вызывающего (05-logic.md). Единственный дополнительный поток — тикер epoch.
+- **Поток.** Вызовы синхронные, в потоке вызывающего (05-logic.md). Служебные потоки — тикер epoch и внутренний работник встроенного кеша Wasmtime (D74). Они не выполняют вызовы логики.
 
 Тесты:
 - property `echo`: случайные `LogicUpdate` и `LogicEvent` из стратегий testkit проходят хост → гость → хост без изменений, NaN как в L2. 2000 случаев, в длинном прогоне 10⁵;
@@ -218,7 +218,7 @@ impl Runtime {
 
 - **Хранилище.** Трейт `PersistStore { load(key) -> StatePatch, write(key, fields) }`, реализации `FsStore` и `MemoryStore`.
 - **`FsStore`.**
-  - **Пути** по D54 и D63: `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/<slot>/<set>.json` и `…/layers/<set>.json`.
+  - **Пути** по D54 и D63: `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/slots/<slot>/<set>.json` и `…/layers/<set>.json`.
   - **Формат** — `{"version": 1, "fields": {...}}` с кодировкой чисел D57.
   - **Запись атомарная:** временный файл, `fsync`, `rename`.
   - **`Output::Persist`** содержит только изменённые поля (05-logic.md), поэтому `write` объединяет их с файлом.
@@ -239,6 +239,7 @@ impl Runtime {
 - **Манифест `plugin.toml`** ([04-plugins.md](../architecture/04-plugins.md)): `id`, `version`, `api`, `name`, `description`, `logic`, `requires`, `[[sets]]`. Поддерживается только `api = "1"`.
 - **Схема набора.**
   - **Корень:** `version = 1`, `id`, `label`, `logic_config`, `persist`, `[units]`, `[layout]`, `[[panels]]`.
+  - **Панели (D76):** обязательная локальная `panels[].layout`; виджеты используют логику владельца. Старые `items`/`element.item` отвергаются.
   - **Узлы:** `row`, `column`, `stack`, `responsive`, `repeat`, `button`, `text`, `icon`, `image`, `slider`, `meter`, `progress`, `scrubber`, `canvas`, `shader-effect`, `fixed-space`, `flexible-space`, `key`, `key-row`.
   - **Привязки к состоянию** `*_from` и обработчики `on_*`.
   - **Размеры** — `Length` (`u`, `%w`, `%h`).
@@ -266,7 +267,7 @@ impl Runtime {
   m.handle(action("volume-level", ValueChanged, 0.7)).expect_request(|r| r.coalesce.as_deref() == Some("volume"));
   ```
 - **DSL сценариев:** `drag(widget, from, to, duration, steps)` для ползунков и `subscription_data(set, tag, data)` для подачи данных по тегу подписки экземпляра.
-- **Property I1–I12 с настоящей логикой:** стратегии этапа 1 на каталоге `controls` с `WasmLogic`. 200 случаев в CI, 10⁴ в `proptest-long`.
+- **Проверка инфраструктуры:** настоящие тестовые wasm-модули, виртуальное время, сбои, подписки и сохранение. Property на controls выполняется в конце L11, когда реализована его логика (согласовано 2026-10-13).
 
 ### L11. controls: наборы и логика
 
@@ -297,6 +298,8 @@ impl Runtime {
   - яркость: `brightness`, `brightness_text`, `brightness_label`.
 - **Значки.** Имена значков пока строки исходного проекта, соответствие символам задаёт рендер этапа 3.
 - **Сохраняемых полей нет.**
+
+- **Property I1–I12 с настоящей логикой:** стратегии этапа 1 на каталоге `controls` с `WasmLogic`. 200 случаев в CI, 10⁴ в `proptest-long`.
 
 ### L12. controls: тесты
 

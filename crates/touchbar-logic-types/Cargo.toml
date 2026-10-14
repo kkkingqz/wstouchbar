@@ -1,0 +1,17 @@
+[package]
+name = "touchbar-logic-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+touchbar-model.workspace = true
+
+[dev-dependencies]
+wit-parser.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -52,7 +52,13 @@ impl Core {
             return;
         }
         for request in requests {
-            if request.validate().is_err() {
+            if request.validate().is_err()
+                || touchbar_logic_types::wire_size_event(&LogicEvent::EffectDone {
+                    tag: request.tag.clone(),
+                    result: Err(EffectError::Failed("too large".into())),
+                }) > self.config.max_update_bytes
+                || matches!(&request.effect, Effect::SpawnRun(spec) if touchbar_logic_types::wire_size_spawn_result(&request.tag, spec.max_output) > self.config.max_update_bytes)
+            {
                 warn(output, "invalid effect request");
                 continue;
             }
@@ -97,16 +103,36 @@ impl Core {
             });
         }
     }
-    fn effect_result(&mut self, owner: InstanceId, tag: String, result: EffectOutcome) {
+    fn effect_result(
+        &mut self,
+        owner: InstanceId,
+        tag: String,
+        result: EffectOutcome,
+        output: &mut Vec<Output>,
+    ) {
         if let Some(instance) = self
             .instances
             .get_mut(&owner.number)
             .filter(|i| i.id == owner)
         {
-            instance.enqueue(LogicEvent::EffectDone { tag, result });
+            let mut event = LogicEvent::EffectDone { tag, result };
+            if touchbar_logic_types::wire_size_event(&event) > self.config.max_update_bytes {
+                warn(output, "effect result exceeds input budget");
+                if let LogicEvent::EffectDone { result, .. } = &mut event {
+                    *result = Err(EffectError::Failed("too large".into()));
+                }
+            }
+            if touchbar_logic_types::wire_size_event(&event) <= self.config.max_update_bytes {
+                instance.enqueue(event);
+            }
         }
     }
-    pub(crate) fn effect_done(&mut self, id: RequestId, result: EffectOutcome) {
+    pub(crate) fn effect_done(
+        &mut self,
+        id: RequestId,
+        result: EffectOutcome,
+        output: &mut Vec<Output>,
+    ) {
         let Some(index) = self.requests.iter().position(|r| r.id == id && r.running) else {
             return;
         };
@@ -114,7 +140,7 @@ impl Core {
         if let Some(timer) = request.timer {
             self.timers.cancel(timer);
         }
-        self.effect_result(id.instance, request.tag, result);
+        self.effect_result(id.instance, request.tag, result, output);
     }
     pub(crate) fn cancel_request(
         &mut self,
@@ -132,7 +158,7 @@ impl Core {
         if request.running {
             output.push(Output::CancelEffect { request: id });
         }
-        self.effect_result(id.instance, request.tag, Err(error));
+        self.effect_result(id.instance, request.tag, Err(error), output);
     }
     pub(crate) fn synchronize_effects(&mut self, output: &mut Vec<Output>) {
         let cancel: Vec<_> = self
@@ -199,7 +225,7 @@ impl Core {
                 Effect::KeyTap { .. } | Effect::KeyDown { .. } | Effect::KeyUp { .. }
             ) {
                 let result = self.key_request(&request, output);
-                self.effect_done(request.id, result);
+                self.effect_done(request.id, result, output);
                 continue;
             }
             if let Some(ms) = request.policy.timeout_ms {

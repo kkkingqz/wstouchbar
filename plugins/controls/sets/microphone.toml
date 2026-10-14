@@ -1,0 +1,31 @@
+version = 1
+id = "microphone"
+label = "Microphone"
+logic_config = "microphone"
+
+[layout]
+kind = "button"
+id = "microphone-toggle"
+label = "Toggle microphone"
+enabled_from = "microphone_available"
+selected_from = "microphone_muted"
+on_activate = "microphone"
+padding = "13.33333333u"
+
+[[layout.children]]
+kind = "row"
+spacing = "6.66666667u"
+padding = "5.00000000u"
+
+[[layout.children.children]]
+kind = "icon"
+symbol_from = "microphone_icon"
+width = "46.66666667u"
+label = "Microphone"
+
+[[layout.children.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "46.66666667u"
+width = "133.33333333u"
+text_from = "microphone_text"

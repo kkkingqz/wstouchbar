@@ -1,0 +1,124 @@
+version = 1
+id = "brightness"
+label = "Brightness"
+logic_config = "brightness"
+
+[layout]
+kind = "responsive"
+
+[[layout.variants]]
+representation = "minimal"
+minimum_width = "0.00000000u"
+
+[layout.variants.layout]
+kind = "button"
+id = "brightness-panel"
+label = "Expand LIGHT"
+hold_ms = 420
+expanded_panel = "brightness-controls"
+press_and_hold_panel = "brightness-controls"
+enabled_from = "available"
+padding = "13.33333333u"
+
+[[layout.variants.layout.children]]
+kind = "row"
+spacing = "5.00000000u"
+padding = "3.33333333u"
+
+[[layout.variants.layout.children.children]]
+kind = "icon"
+symbol = "chevron.right"
+label = "LIGHT"
+width = "40.00000000u"
+
+[[layout.variants.layout.children.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "60.00000000u"
+width = "133.33333333u"
+maximum = "266.66666667u"
+grow = 1
+text_from = "brightness_label"
+
+[[layout.variants]]
+representation = "full"
+minimum_width = "333.33333333u"
+
+[layout.variants.layout]
+kind = "row"
+spacing = "8.33333333u"
+padding = "6.66666667u"
+
+[[layout.variants.layout.children]]
+kind = "icon"
+symbol = "chevron.right"
+label = "LIGHT"
+width = "50.00000000u"
+
+[[layout.variants.layout.children]]
+kind = "slider"
+id = "brightness-level"
+label = "BRIGHTNESS"
+value_from = "brightness"
+enabled_from = "available"
+minimum = "100.00000000u"
+width = "200.00000000u"
+maximum = "1333.33333333u"
+grow = 1
+on_pressed = "brightness-level"
+on_value_changed = "brightness-level"
+on_activate = "brightness-level"
+on_released = "brightness-level"
+on_cancelled = "brightness-level"
+
+[[layout.variants.layout.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "56.66666667u"
+width = "80.00000000u"
+maximum = "1666.66666667u"
+text_from = "brightness_text"
+
+[[panels]]
+id = "brightness-controls"
+minimum_width = "400.00000000u"
+preferred_width = "533.33333333u"
+maximum_width = "766.66666667u"
+dismiss_on_selection = true
+principal_item = "brightness-panel-level"
+
+
+[panels.layout]
+kind = "row"
+spacing = "8.33333333u"
+padding = "6.66666667u"
+
+[[panels.layout.children]]
+kind = "icon"
+symbol = "chevron.right"
+label = "LIGHT"
+width = "50.00000000u"
+
+[[panels.layout.children]]
+kind = "slider"
+id = "brightness-panel-level"
+label = "BRIGHTNESS"
+value_from = "brightness"
+enabled_from = "available"
+minimum = "100.00000000u"
+width = "200.00000000u"
+maximum = "1333.33333333u"
+grow = 1
+on_pressed = "brightness-level"
+on_value_changed = "brightness-level"
+on_activate = "brightness-level"
+on_released = "brightness-level"
+on_cancelled = "brightness-level"
+
+[[panels.layout.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "56.66666667u"
+width = "80.00000000u"
+maximum = "1666.66666667u"
+text_from = "brightness_text"

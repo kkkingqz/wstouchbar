@@ -1,0 +1,153 @@
+version = 1
+id = "volume"
+label = "Volume"
+logic_config = "volume"
+
+[layout]
+kind = "responsive"
+
+[[layout.variants]]
+representation = "minimal"
+minimum_width = "0.00000000u"
+
+[layout.variants.layout]
+kind = "button"
+id = "volume-panel"
+label = "Expand VOL"
+hold_ms = 420
+expanded_panel = "volume-controls"
+press_and_hold_panel = "volume-controls"
+enabled_from = "available"
+padding = "13.33333333u"
+selected_from = "volume_selected"
+
+[[layout.variants.layout.children]]
+kind = "row"
+spacing = "5.00000000u"
+padding = "3.33333333u"
+
+[[layout.variants.layout.children.children]]
+kind = "icon"
+symbol_from = "volume_icon"
+label = "VOL"
+width = "40.00000000u"
+
+[[layout.variants.layout.children.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "60.00000000u"
+width = "133.33333333u"
+maximum = "266.66666667u"
+grow = 1
+text_from = "volume_label"
+
+[[layout.variants]]
+representation = "full"
+minimum_width = "333.33333333u"
+
+[layout.variants.layout]
+kind = "row"
+spacing = "8.33333333u"
+padding = "6.66666667u"
+
+[[layout.variants.layout.children]]
+kind = "icon"
+symbol_from = "volume_icon"
+label = "VOL"
+width = "50.00000000u"
+
+[[layout.variants.layout.children]]
+kind = "slider"
+id = "volume-level"
+label = "VOLUME"
+value_from = "volume"
+enabled_from = "available"
+minimum = "100.00000000u"
+width = "200.00000000u"
+maximum = "1333.33333333u"
+grow = 1
+on_pressed = "volume-level"
+on_value_changed = "volume-level"
+on_activate = "volume-level"
+on_released = "volume-level"
+on_cancelled = "volume-level"
+
+[[layout.variants.layout.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "56.66666667u"
+width = "80.00000000u"
+maximum = "1666.66666667u"
+text_from = "volume_text"
+
+[[panels]]
+id = "volume-controls"
+minimum_width = "466.66666667u"
+preferred_width = "600.00000000u"
+maximum_width = "933.33333333u"
+dismiss_on_selection = true
+principal_item = "volume-panel-level"
+
+
+[panels.layout]
+kind = "row"
+spacing = "8.33333333u"
+padding = "6.66666667u"
+
+[[panels.layout.children]]
+kind = "icon"
+symbol_from = "volume_icon"
+label = "VOL"
+width = "50.00000000u"
+
+[[panels.layout.children]]
+kind = "slider"
+id = "volume-panel-level"
+label = "VOLUME"
+value_from = "volume"
+enabled_from = "available"
+minimum = "100.00000000u"
+width = "200.00000000u"
+maximum = "1333.33333333u"
+grow = 1
+on_pressed = "volume-level"
+on_value_changed = "volume-level"
+on_activate = "volume-level"
+on_released = "volume-level"
+on_cancelled = "volume-level"
+
+[[panels.layout.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "56.66666667u"
+width = "80.00000000u"
+maximum = "1666.66666667u"
+text_from = "volume_text"
+
+
+[[panels.layout.children]]
+kind = "button"
+id = "volume-panel-microphone"
+label = "Toggle microphone"
+enabled_from = "microphone_available"
+selected_from = "microphone_muted"
+on_activate = "microphone"
+padding = "13.33333333u"
+
+[[panels.layout.children.children]]
+kind = "row"
+spacing = "6.66666667u"
+padding = "5.00000000u"
+
+[[panels.layout.children.children.children]]
+kind = "icon"
+symbol_from = "microphone_icon"
+width = "46.66666667u"
+label = "Microphone"
+
+[[panels.layout.children.children.children]]
+kind = "text"
+font_size = "18.33333333u"
+minimum = "46.66666667u"
+width = "133.33333333u"
+text_from = "microphone_text"

@@ -18,106 +18,40 @@
 - **Компиляция.** Модуль компилируется один раз на плагин и ревизию. Скомпилированный модуль кеширует встроенный кеш wasmtime в `$XDG_CACHE_HOME/touchbar/wasm`, без собственной сериализации и `unsafe` (D70).
 - **Экземпляры.** Отдельный экземпляр wasm создаётся на каждый экземпляр набора в профиле. `controls` с `logic_config = "volume"` и `controls` с `logic_config = "microphone"` — два независимых экземпляра со своей памятью.
 - **Панели.** Виджеты `PanelSpec` вызывают ту же логику и используют состояние владельца. Хост сохраняет физический захват и якорь приватно вместе с вызовом; WIT не меняется (D48–D49).
-- **Поток.** Вызовы выполняются в главном потоке сессии.
+- **Поток.** Вызовы выполняются в главном потоке сессии. Разрешены служебные потоки тикера epoch и встроенного кеша Wasmtime; они не выполняют логику (D74). Тикер спит без таймаута, пока нет активного create или call; RAII-захват включает миллисекундные тики только на время instantiate, describe, init и handle.
 
 ## Контракт (WIT)
 
-Это черновик. Точные типы закрепляются на этапе 2 (см. [15-roadmap.md](15-roadmap.md)), файл — `wit/logic.wit`.
+Окончательный контракт версии 1.0.0 — [wit/logic.wit](../../wit/logic.wit). Биндинги SDK и runtime генерируются непосредственно из него. World `logic` экспортирует интерфейс `wstouchbar:logic/api@1.0.0`; `describe`, `init` и `handle` находятся в этом интерфейсе вместе со всеми типами API. Импортируемая функция `log` использует локальный enum `log-level`; импорт типа enum не даёт гостю дополнительной возможности вызова.
 
-```wit
-package wstouchbar:logic@1.0.0;
+| WIT | Rust |
+|---|---|
+| `scalar`, `scalar-kind` | `Scalar`, `ScalarKind` |
+| `record-value`, `fact-value` | `RecordValue`, `FactValue` |
+| `field-kind`, `field`, `value`, `state-patch` | `FieldKind`, `StateField`, `StateValue`, `StatePatch` |
+| `point`, `rect` | `Point`, `Rect` |
+| `color-role`, `canvas-color`, `rgba` | `ColorRole`, `CanvasColor`; `rgba` — поля варианта `Rgba` |
+| `canvas-paint`, `canvas-linear-gradient`, `text-align` | `CanvasPaint`, `CanvasLinearGradient`, `TextAlign` |
+| `canvas-command` | `CanvasCommand`, все восемь вариантов |
+| `canvas-rect`, `canvas-line`, `canvas-polyline`, `canvas-circle`, `canvas-text`, `canvas-gradient-rect`, `canvas-path`, `canvas-fill-path` | поля соответствующих вариантов `CanvasCommand` |
+| `canvas-path-segment`, `canvas-quadratic-segment`, `canvas-cubic-segment` | `CanvasPathSegment` и поля вариантов `QuadraticTo`, `CubicTo` |
+| `action-kind`, `action-description`, `description` | `ActionKind`, `ActionDescription`, `LogicDescription` |
+| `origin`, `cancel-reason`, `action-event`, `context` | `Origin`, `CancelReason`, `ActionEvent`, `LogicContext` |
+| `call-context` | `CallContext` из `touchbar-logic-types`, `now-ms` — монотонные миллисекунды `Timestamp` |
+| `event` | `LogicEvent` |
+| `effect-done`, `subscription-message`, `subscription-lost` | поля соответствующих вариантов `LogicEvent`, включая тег |
+| `audio-target`, `mute-value`, `bus`, `system-key` | `AudioTarget`, `MuteValue`, `Bus`, `SystemKey` |
+| `dbus-value`, `dbus-call`, `dbus-match`, `dbus-property`, `spawn-spec` | `DbusValue`, `DbusCall`, `DbusMatch`, `DbusProperty`, `SpawnSpec` |
+| `effect`, `audio-volume`, `audio-mute`, `desktop-shortcut` | `Effect` и поля соответствующих вариантов |
+| `lifetime`, `request` | `Lifetime`, `EffectRequest`; `timeout-ms` — `option<u64>`, как в модели |
+| `effect-error`, `spawn-result`, `effect-result`, `effect-outcome` | `EffectError`, `SpawnResult`, `EffectResult`, `EffectOutcome` |
+| `subscription-kind`, `subscription`, `subscription-data` | `SubscriptionKind`, `SubscriptionSpec`, `SubscriptionData` |
+| `audio-state`, `playback-status`, `media-state` | `AudioState`, `PlaybackStatus`, `MediaState` |
+| `placement`, `lifecycle`, `command`, `open-panel` | `Placement`, `PresentationLifecycle`, `PresentationCommand` и поля варианта `Open` |
+| `update` | `LogicUpdate` |
+| `log-level` | уровень журнала SDK/runtime; возможности ядра не расширяет |
 
-interface api {
-    enum scalar-kind { boolean, number, text }
-    variant scalar { boolean(bool), number(f64), text(string) }
-
-    /// Поле состояния. Записи нужны для `repeat`, canvas для `canvas_from`.
-    variant field-kind { scalar(scalar-kind), records(list<tuple<string, scalar-kind>>), canvas }
-    record field { name: string, kind: field-kind, persist: bool }
-
-    type record-value = list<tuple<string, scalar>>;
-    variant value { scalar(scalar), records(list<record-value>), canvas(list<canvas-command>) }
-    type state-patch = list<tuple<string, value>>;
-
-    // canvas-command — перенос из ui WIT исходного проекта (линии, пути, текст, градиенты)
-
-    enum action-kind { pressed, long-pressed, activated, released, cancelled, value-changed, selected }
-    record action-description { kinds: list<action-kind>, value: option<scalar-kind> }
-    record description {
-        actions: list<tuple<string, action-description>>,
-        state: list<field>,
-    }
-
-    enum origin { physical, synthetic }
-    enum cancel-reason { hidden, layer, presentation, profile, layout, mode, revoked, fault, hardware, surface-removed }
-    record action-event {
-        action: string,
-        kind: action-kind,
-        value: option<scalar>,
-        record-key: option<string>,
-        origin: origin,
-        cancel-reason: option<cancel-reason>,
-    }
-
-    record context {
-        surface-kind: string,         // touchbar | window | headless
-        slot-width: f32,              // ширина слота в базовых единицах u
-        representation: string,       // текущий вариант responsive
-        color-scheme: string,         // light | dark
-        accent: option<string>,
-        locale: string,
-    }
-
-    variant event {
-        action(action-event),
-        shown,
-        hidden,
-        context-changed(context),
-        presentation-closed(string),  // id панели, закрытой ядром
-        effect-done(effect-result),
-        subscription-data(subscription-data),
-        subscription-lost(subscription-lost),
-    }
-
-    record call-context { now-ms: u64 }
-
-    // Подробно — в 06-effects.md
-    variant effect { /* audio, media, desktop, key, open-uri, spawn, dbus-call, timer */ }
-    enum lifetime { until-hidden, committed }
-    record request {
-        tag: string,                  // логика сама сопоставляет результат; ID хоста она не видит
-        effect: effect,
-        lifetime: option<lifetime>,   // по умолчанию из каталога действий
-        coalesce: option<string>,     // ключ объединения, выполняется последний запрос
-        timeout-ms: option<u32>,
-    }
-    variant subscription-kind { /* audio-watch, media-watch, desktop-fact, interval, spawn-lines, dbus-signal */ }
-    record subscription { tag: string, kind: subscription-kind, background: bool }
-    // effect-result, subscription-data, subscription-lost — типизированные варианты по видам
-
-    enum placement { anchored, region, full }
-    enum lifecycle { transient, persistent }   // transient — пока держится касание-якорь
-    variant command { open(tuple<string, placement, lifecycle>), close }
-
-    record update {
-        state: state-patch,
-        requests: list<request>,
-        cancel: list<string>,                     // теги запросов
-        subscriptions: option<list<subscription>>, // none = без изменений, some = желаемое множество целиком
-        presentation: option<command>,
-    }
-
-    describe: func() -> description;
-    init: func(config: string, persisted: state-patch, ctx: call-context) -> result<update, string>;
-    handle: func(event: event, ctx: call-context) -> result<update, string>;
-}
-
-world logic {
-    enum log-level { trace, debug, info, warn, error }
-    import log: func(level: log-level, message: string);
-    export api;
-}
-```
+WIT использует списки пар для карт (`record-value`, `spawn-spec.env`). Перевод проверяет повторные ключи: непредставимый элемент отбрасывается с предупреждением, а не молча перезаписывает предыдущее значение (D71). `presentation-closed` и `open-panel.panel` передают `PanelId` строкой с проверкой идентификатора при переводе.
 
 В WIT нет рекурсивных типов. Поэтому значения D-Bus и прочие деревья передаются строкой в фиксированном формате (сигнатура D-Bus и значение в JSON, см. [06-effects.md](06-effects.md)).
 
@@ -130,7 +64,7 @@ world logic {
 - **Время.** Время задаёт вызывающий: runtime передаёт `call-context.now-ms` из аргумента вызова, других часов у модуля нет (D68).
 - **Детерминизм.** Движок настроен детерминированно: канонизация NaN, без потоков, детерминированный relaxed SIMD, без WASI. Одинаковые входы дают одинаковые обновления.
 - **Версии.** Runtime сначала требует точное имя экспорта `wstouchbar:logic/api@1.0.0`, затем сверяет типы с биндингами v1 (D69). Совпадение сигнатур само по себе не подтверждает версию: компонент с экспортом `wstouchbar:logic/api@9.0.0` отвергается даже при идентичных типах. У каждой будущей поддерживаемой версии интерфейса свои биндинги с общим переводом в типы модели. Неподдерживаемая версия, несовместимые типы или любой импорт, кроме `log`, дают `InstanceFault` при загрузке.
-- **Модули.** Модуль хранится по плагину и ревизии; живые экземпляры держат прежний модуль до уничтожения, `describe` вызывается один раз на модуль. После trap экземпляр освобождается, повтор идёт через `CreateInstance` нового поколения.
+- **Модули.** `load_module` только кеширует модуль по `(plugin, revision)`. `create` получает явную ревизию из принятого каталога (D73): неудачная перезагрузка каталога не переключает логику старого. Модуль хранится по плагину и ревизии; живые экземпляры держат прежний модуль до уничтожения, `describe` вызывается один раз на модуль. После trap экземпляр освобождается, повтор идёт через `CreateInstance` нового поколения.
 - **Журнал гостя.** Записи возвращаются вместе с ответом вызова, в journald их отправляет оболочка. Не больше 64 записей по 1 КиБ за вызов, остальные заменяются одной записью-счётчиком.
 
 ## Правила вызова
@@ -148,15 +82,26 @@ world logic {
 
 Константы хранятся в `touchbar-logic-types` и общие для хоста, SDK и ядра (A13): `CoreConfig::default()` берёт значения оттуда (D71).
 
-Runtime проверяет то, что видно только ему: время вызова, память и общий размер обновления по оценке `touchbar-logic-types`. Нарушение даёт `LogicFault`. Перевод из WIT отбрасывает непредставимые элементы (повторные ключи записи, невалидные идентификаторы) с предупреждением. Остальное ядро проверяет поэлементно.
+Runtime проверяет то, что видно только ему: время вызова, суммарную линейную память и число элементов wasm-таблиц экземпляра, общий размер входа и обновления по оценке `touchbar-logic-types`. Нарушение даёт `LogicFault`. Перевод из WIT отбрасывает непредставимые элементы (повторные ключи записи, невалидные идентификаторы) с предупреждением. Остальное ядро проверяет поэлементно.
 
 | Лимит | Значение по умолчанию |
 |---|---|
 | Время вызова | мягкий предел 5 мс (предупреждение в журнале), жёсткий 50 мс (epoch interruption → сбой) |
-| Память экземпляра | 16 МиБ |
+| Линейная память экземпляра | 16 МиБ суммарно |
+| Элементы wasm-таблиц | 65 536 суммарно на экземпляр (`max_table_elements`) |
+| Стек wasm | 512 КиБ |
 | Размер обновления | 256 КиБ, до 64 запросов, до 32 подписок |
 | Текст в состоянии | 4 КиБ на поле, 1000 записей на поле |
 | Сохраняемое состояние | 64 КиБ на экземпляр |
+| Журнал за вызов | 64 записи по 1 КиБ |
+
+Начальные размеры и рост всех таблиц учитываются в одном бюджете Store;
+неудачное выделение возвращает зарезервированные элементы. Отказ
+`table.grow` с последующим trap диагностируется с причиной `table`,
+сбой начального выделения — как `InstanceFault`. Линейная память и таблицы
+имеют отдельные бюджеты (D77); лимит таблиц не меняет WIT или CoreConfig.
+
+Лимиты по умолчанию заданы в `touchbar-logic-types::LogicLimits`, ядро берёт оттуда свои значения. Общий бюджет обновления оценивается без сериализации: заголовок 64 байта, запись списка 16 байт, строка 8 байт плюс UTF-8, дискриминант скаляра 8 байт; фиксированная команда canvas 64 байта, сегмент пути 32 байта. Оценка включает вложенные записи, argv/env/stdin, D-Bus, подписки и панели. Вход (`init` с конфигурацией и сохранёнными полями либо `handle` с событием) проверяется до выделения WIT-структур по тому же пределу 256 КиБ. Арифметика насыщается, граница включительная. Поэлементные проверки остаются в ядре.
 
 Сбой — это trap, превышение жёсткого предела времени или памяти. Он переводит экземпляр в `Faulted` (см. [03-core.md](03-core.md)). Повтор идёт с backoff, состояние начинается заново с `init` и сохранённых полей. Хост из-за плагина не завершается никогда.
 
@@ -170,7 +115,7 @@ Runtime проверяет то, что видно только ему: врем
 
 ## Сохраняемое состояние
 
-Поля с `persist = true` сохраняются по стабильному ключу: плагин-владелец набора (не поставщик общей логики), имя поверхности и область размещения (D54). Для профиля путь — `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/<slot>/<set>.json`; для слоя — `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/layers/<set>.json`. Области независимы, даже если идентификаторы слота и набора совпадают.
+Поля с `persist = true` сохраняются по стабильному ключу: плагин-владелец набора (не поставщик общей логики), имя поверхности и область размещения (D54). Для профиля путь — `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/slots/<slot>/<set>.json`; для слоя — `$XDG_STATE_HOME/touchbar/<plugin>/<surface>/layers/<set>.json`. Области независимы, даже если идентификаторы слота и набора совпадают.
 
 `CreateInstance.persist_key` позволяет хосту прочитать файл; он возвращает поля в `LogicDescribed.persisted`. Ядро проверяет описание до заполнения кеша, отбрасывает неизвестные, несохраняемые, несовместимые и превышающие лимиты поля, затем передаёт результат в `init`. Если в ядре уже есть состояние этого ключа, оно имеет приоритет над загруженным с диска (D55), в том числе после пересоздания по ревизии или переподключения поверхности.
 
@@ -178,10 +123,16 @@ Runtime проверяет то, что видно только ему: врем
 
 ## SDK
 
-`touchbar-logic-sdk` (Rust) собирается под `wasm32-unknown-unknown`, где у `std` нет импортов WASI. `xtask` и `touchbar-wasm-fixtures` превращают модуль в компонент библиотекой `wit-component`.
+`touchbar-logic-sdk` (Rust) собирается под `wasm32-unknown-unknown`, где у `std` нет импортов WASI. `touchbar-wasm-fixtures` превращает модуль в компонент библиотекой `wit-component`; отдельный `xtask` относится к следующим этапам.
 
-Логика пишется как `impl Logic` на типах `touchbar-model`: тех же `LogicEvent`, `LogicUpdate`, `Effect` и `StatePatch`, что видят ядро и testkit (D67). Перевод в WIT скрыт в SDK. Макрос `export!` генерирует экспорт только под `wasm32`, поэтому логику можно проверять обычными тестами и без wasm. Код, сгенерированный `wit-bindgen`, содержит `unsafe`: в SDK и плагинах действует `unsafe_code = "deny"` с исключением только для модуля биндингов. SDK даёт:
-- типизированные помощники для описания, обновлений и запросов;
-- разбор результатов модулей `audio`, `media` и `desktop`;
-- макрос экспорта;
-- тестовую обвязку для запуска модуля с последовательностью событий через `touchbar-testkit`.
+Логика пишет `impl Logic` на типах `touchbar-model`. Перевод WIT скрыт в SDK и runtime (D67). SDK предоставляет `Description`, `Update`, `Request`, `CallContext`, журнал `log` и макрос `export!`. `Request::committed`, `coalesce` и `timeout` описывают политики, которые исполняет ядро. `Update::build` и экспорт в debug-сборке проверяют общий бюджет.
+
+Макрос генерирует экспорт только под wasm32; обычные host-тесты используют тот же trait без ABI. Код биндингов имеет локальное исключение `unsafe_code`, обычный SDK и плагины запрещают unsafe.
+
+Готовый модуль controls обслуживает конфигурации `volume`, `microphone` и `brightness`. Его состояние несохраняемое, подписки работают только при видимости. Громкость и яркость сохраняют оптимистичное значение во время drag; `activated` на Up (контракт slider ядра), `released` и `cancelled` возвращают последнее значение подписки. Запросы committed продолжаются по правилам D37. Микрофон подтверждается результатом `Mute(bool)`; ошибку последнего переключения откатывает к последнему значению подписки, старый ответ не перезаписывает новое переключение.
+
+`ModuleTester` и `WasmLogic` находятся в `touchbar-testkit`. Первый вызывает настоящий компонент и проверяет обновления; второй связывает компонент с ядром, виртуальным временем и поддельными исполнителями. Примеры — [testing.md](../testing.md), результаты этапа — [приёмка этапа 2](../validation/stage-2.md).
+
+Runtime хранит точные InstanceId неудачных create и экземпляров, удалённых из-за trap, таймаута или бюджета ответа гостя, до подтверждения DisposeInstance от ядра. Первое подтверждение потребляет запись без предупреждения; другое поколение или повторный dispose остаётся ошибкой хоста в журнале. Успешный повторный create с тем же id снимает старую запись; отказ дублирующего create живого экземпляра её не добавляет.
+
+Оболочка задаёт одинаковые общие бюджеты в CoreConfig и RuntimeConfig.limits. Разные значения max_update_bytes — ошибка настройки хоста: последний отказ runtime сохраняет Store, но LogicError на Init остаётся ошибкой инициализации для ядра. При согласованных пределах полный Init проверен до вызова и этот отказ не возникает.

@@ -39,6 +39,8 @@ impl Core {
             || desired.iter().enumerate().any(|(index, spec)| {
                 spec.tag.is_empty()
                     || spec.kind.validate().is_err()
+                    || touchbar_logic_types::wire_size_event(&LogicEvent::SubscriptionLost {tag: spec.tag.clone(), error: EffectError::Failed("too large".into())}) > self.config.max_update_bytes
+                    || matches!(&spec.kind, SubscriptionKind::SpawnLines(spawn) if touchbar_logic_types::wire_size_spawn_result(&spec.tag, spawn.max_output) > self.config.max_update_bytes)
                     || desired[..index].iter().any(|old| old.tag == spec.tag)
             })
         {
@@ -159,7 +161,12 @@ impl Core {
             });
         }
     }
-    pub(crate) fn subscription_lost(&mut self, id: SubscriptionId, error: EffectError) {
+    pub(crate) fn subscription_lost(
+        &mut self,
+        id: SubscriptionId,
+        error: EffectError,
+        output: &mut Vec<Output>,
+    ) {
         let Some(record) = self.subscriptions.iter_mut().find(|s| s.active == Some(id)) else {
             return;
         };
@@ -180,10 +187,19 @@ impl Core {
             .get_mut(&id.instance.number)
             .filter(|i| i.id == id.instance)
         {
-            instance.enqueue(LogicEvent::SubscriptionLost {
+            let mut event = LogicEvent::SubscriptionLost {
                 tag: record.spec.tag.clone(),
                 error,
-            });
+            };
+            if touchbar_logic_types::wire_size_event(&event) > self.config.max_update_bytes {
+                warn(output, "subscription error exceeds input budget");
+                if let LogicEvent::SubscriptionLost { error, .. } = &mut event {
+                    *error = EffectError::Failed("too large".into());
+                }
+            }
+            if touchbar_logic_types::wire_size_event(&event) <= self.config.max_update_bytes {
+                instance.enqueue(event);
+            }
         }
     }
     pub(crate) fn subscription_timer(&mut self, owner: InstanceId, tag: &str, timer: TimerId) {
@@ -205,9 +221,23 @@ impl Core {
             return;
         };
         let record = &self.subscriptions[index];
-        if !self.subscription_eligible(record)
-            || !valid_data(&record.spec.kind, &data, &self.config)
-        {
+        if !self.subscription_eligible(record) {
+            return;
+        }
+        let event = LogicEvent::SubscriptionData {
+            tag: record.spec.tag.clone(),
+            data,
+        };
+        if touchbar_logic_types::wire_size_event(&event) > self.config.max_update_bytes {
+            warn(output, "subscription data exceeds input budget");
+            output.push(Output::Unsubscribe { subscription: id });
+            self.subscription_lost(id, EffectError::Failed("too large".into()), output);
+            return;
+        }
+        let LogicEvent::SubscriptionData { data, .. } = &event else {
+            unreachable!()
+        };
+        if !valid_data(&record.spec.kind, data, &self.config) {
             warn(output, "invalid subscription data");
             return;
         }
@@ -217,10 +247,7 @@ impl Core {
             .get_mut(&id.instance.number)
             .filter(|i| i.id == id.instance)
         {
-            instance.enqueue(LogicEvent::SubscriptionData {
-                tag: self.subscriptions[index].spec.tag.clone(),
-                data,
-            });
+            instance.enqueue(event);
         }
     }
 }

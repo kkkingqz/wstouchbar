@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use touchbar_core::{Input, PersistKey};
+use touchbar_logic_runtime::{MemoryStore, PersistStore};
 use touchbar_model::*;
 #[derive(Clone, Debug)]
 pub enum LogicReaction {
@@ -17,6 +19,7 @@ struct Registration {
 pub struct FakeLogic {
     handlers: BTreeMap<SetRef, Registration>,
     pub calls: Vec<(InstanceId, CallId, LogicCall)>,
+    pub(crate) store: MemoryStore,
 }
 impl FakeLogic {
     pub fn register(
@@ -96,11 +99,9 @@ fn infer_description(set: &SetSpec) -> LogicDescription {
                 continue;
             }
             let kind = match binding {
-                StateBinding::Text | StateBinding::Symbol | StateBinding::Selected => {
-                    FieldKind::Scalar(ScalarKind::Text)
-                }
+                StateBinding::Text | StateBinding::Symbol => FieldKind::Scalar(ScalarKind::Text),
                 StateBinding::Value => FieldKind::Scalar(ScalarKind::Number),
-                StateBinding::Enabled | StateBinding::Visible => {
+                StateBinding::Enabled | StateBinding::Visible | StateBinding::Selected => {
                     FieldKind::Scalar(ScalarKind::Boolean)
                 }
                 StateBinding::Canvas => FieldKind::Canvas,
@@ -117,4 +118,97 @@ fn infer_description(set: &SetSpec) -> LogicDescription {
         }
     }
     description
+}
+
+/// A synchronous host. Replies are scheduled by Harness at virtual now + delay.
+pub trait LogicHost {
+    fn create(
+        &mut self,
+        now: Timestamp,
+        instance: InstanceId,
+        set: &SetSpec,
+        provider: Option<&PluginSpec>,
+        key: &PersistKey,
+    ) -> Input;
+    fn invoke(
+        &mut self,
+        now: Timestamp,
+        set: &SetRef,
+        instance: InstanceId,
+        call: CallId,
+        invocation: &LogicCall,
+    ) -> Option<(u64, Input)>;
+    fn dispose(&mut self, instance: InstanceId);
+    fn persist(&mut self, key: &PersistKey, fields: &StatePatch) -> Result<(), String>;
+}
+impl LogicHost for FakeLogic {
+    fn create(
+        &mut self,
+        _now: Timestamp,
+        instance: InstanceId,
+        set: &SetSpec,
+        _provider: Option<&PluginSpec>,
+        key: &PersistKey,
+    ) -> Input {
+        match self.store.load(key) {
+            Ok(persisted) => Input::LogicDescribed {
+                instance,
+                description: self.description(set),
+                persisted,
+            },
+            Err(e) => Input::InstanceFault {
+                instance,
+                reason: e.to_string(),
+            },
+        }
+    }
+    fn invoke(
+        &mut self,
+        _now: Timestamp,
+        set: &SetRef,
+        instance: InstanceId,
+        call: CallId,
+        invocation: &LogicCall,
+    ) -> Option<(u64, Input)> {
+        let reply = match self.call(set, instance, call, invocation) {
+            LogicReaction::Update(update) => (
+                0,
+                Input::LogicUpdate {
+                    instance,
+                    call,
+                    update,
+                },
+            ),
+            LogicReaction::Delayed { ms, update } => (
+                ms,
+                Input::LogicUpdate {
+                    instance,
+                    call,
+                    update,
+                },
+            ),
+            LogicReaction::Error(message) => (
+                0,
+                Input::LogicError {
+                    instance,
+                    call,
+                    message,
+                },
+            ),
+            LogicReaction::Fault(reason) => (
+                0,
+                Input::LogicFault {
+                    instance,
+                    call,
+                    reason,
+                },
+            ),
+            LogicReaction::Hang => return None,
+        };
+        Some(reply)
+    }
+    fn dispose(&mut self, _instance: InstanceId) {}
+    fn persist(&mut self, key: &PersistKey, fields: &StatePatch) -> Result<(), String> {
+        self.store.write(key, fields).map_err(|e| e.to_string())
+    }
 }

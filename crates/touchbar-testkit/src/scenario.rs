@@ -20,10 +20,12 @@ enum Step {
     Down(u32, Target),
     Up(u32),
     Expect(EffectCheck),
+    Drag(Target, f64, f64, u64, u32),
+    Subscription(SurfaceId, String, String, SubscriptionData),
 }
-pub struct Scenario {
+pub struct Scenario<H: LogicHost = FakeLogic> {
     config: CoreConfig,
-    logic: FakeLogic,
+    logic: H,
     effects: FakeEffects,
     steps: Vec<Step>,
 }
@@ -35,14 +37,18 @@ pub fn scenario() -> Scenario {
         steps: vec![],
     }
 }
-impl Scenario {
+impl<H: LogicHost> Scenario<H> {
     pub fn config(mut self, config: CoreConfig) -> Self {
         self.config = config;
         self
     }
-    pub fn logic(mut self, logic: FakeLogic) -> Self {
-        self.logic = logic;
-        self
+    pub fn logic<N: LogicHost>(self, logic: N) -> Scenario<N> {
+        Scenario {
+            config: self.config,
+            logic,
+            effects: self.effects,
+            steps: self.steps,
+        }
     }
     pub fn effects(mut self, effects: FakeEffects) -> Self {
         self.effects = effects;
@@ -82,9 +88,27 @@ impl Scenario {
         self.steps.push(Step::Expect(Box::new(check)));
         self
     }
-    pub fn run(self) -> Harness {
-        let mut harness = Harness::new(self.config);
-        harness.logic = self.logic;
+    pub fn drag(mut self, widget: &str, from: f64, to: f64, duration: u64, steps: u32) -> Self {
+        self.steps
+            .push(Step::Drag(at(widget), from, to, duration, steps));
+        self
+    }
+    pub fn subscription_data(self, set: &str, tag: &str, data: SubscriptionData) -> Self {
+        self.subscription_data_on(SurfaceId(1), set, tag, data)
+    }
+    pub fn subscription_data_on(
+        mut self,
+        surface: SurfaceId,
+        set: &str,
+        tag: &str,
+        data: SubscriptionData,
+    ) -> Self {
+        self.steps
+            .push(Step::Subscription(surface, set.into(), tag.into(), data));
+        self
+    }
+    pub fn run(self) -> Harness<H> {
+        let mut harness = Harness::with_logic(self.config, self.logic);
         harness.effects = self.effects;
         harness.send(Input::SurfaceAdded(headless(1)));
         for step in self.steps {
@@ -99,6 +123,12 @@ impl Scenario {
                     harness.touch(target.surface, contact, TouchPhase::Down, point);
                 }
                 Step::Up(contact) => harness.touch_up(SurfaceId(1), contact),
+                Step::Drag(target, from, to, duration, steps) => {
+                    harness.drag(target.surface, &target.widget, from, to, duration, steps)
+                }
+                Step::Subscription(surface, set, tag, data) => {
+                    harness.subscription_data(surface, &set, &tag, data)
+                }
                 Step::Expect(check) => assert!(
                     harness
                         .effects
