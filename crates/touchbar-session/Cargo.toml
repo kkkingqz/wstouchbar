@@ -1,0 +1,31 @@
+[package]
+name = "touchbar-session"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+touchbar-model.workspace = true
+touchbar-core.workspace = true
+touchbar-loader.workspace = true
+touchbar-scene.workspace = true
+touchbar-gl.workspace = true
+touchbar-desktop.workspace = true
+touchbar-effects.workspace = true
+touchbar-audio.workspace = true
+touchbar-logic-runtime.workspace = true
+async-io.workspace = true
+async-channel.workspace = true
+futures-lite.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+rustix.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-journald.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

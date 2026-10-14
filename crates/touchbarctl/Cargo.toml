@@ -1,0 +1,22 @@
+[package]
+name = "touchbarctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+touchbar-model.workspace = true
+touchbar-core.workspace = true
+touchbar-loader.workspace = true
+touchbar-scene.workspace = true
+touchbar-gl.workspace = true
+touchbar-logic-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rustix.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

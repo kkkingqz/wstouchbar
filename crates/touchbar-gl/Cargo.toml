@@ -1,0 +1,24 @@
+[package]
+name = "touchbar-gl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+touchbar-ui.workspace = true
+glow.workspace = true
+khronos-egl.workspace = true
+naga.workspace = true
+png.workspace = true
+thiserror.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+disallowed_types = "deny"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+match_same_arms = "warn"

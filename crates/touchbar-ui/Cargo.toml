@@ -1,0 +1,18 @@
+[package]
+name = "touchbar-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+cosmic-text.workspace = true
+resvg.workspace = true
+taffy.workspace = true
+naga.workspace = true
+
+[lints]
+workspace = true

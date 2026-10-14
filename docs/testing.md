@@ -137,3 +137,17 @@ cargo run -p touchbar-logic-runtime --example controls_benchmark --release --loc
 controls_properties использует те же GeneratedScenario/GeneratedStep, что этап 1, с настоящим модулем и поддельными эффектами. Runtime переиспользуется между случаями для кеша компиляции; все гостевые экземпляры уничтожаются при удалении поверхностей. Тест отдельно требует успешной инициализации controls, проверяет долю Panel/Pending/Faulted и JSON replay. Смена ревизии на несовместимый hang и действия через совместимый trap проверяют fault paths.
 
 В длинном CI обе переменные заданы явно: PROPTEST_CASES=100000, PROPTEST_CONTROLS_CASES=10000. Они независимы, поэтому можно увеличить число быстрых свойств без случайного увеличения дорогого controls-прогона. Замеры и результаты — [приёмка этапа 2](validation/stage-2.md).
+
+## Stage three environment tests
+
+Native workspace builds require `libpipewire-0.3-dev`, `clang`, and `pkg-config` in addition to the Rust toolchain and build tools. EGL is loaded dynamically; ordinary tests do not need a GPU or running services.
+
+```sh
+cargo xtask test-env gpu
+cargo xtask test-env dbus
+cargo xtask test-env pipewire
+```
+
+Ignored environment tests use name prefixes `env_gpu_`, `env_dbus_`, and `env_pipewire_`. The commands validate prerequisites and run only the corresponding ignored tests with `--locked`; failures propagate as a nonzero exit status. GPU preflight inspects EGL/GLES runtime libraries through `ldconfig` on PATH, then tests check actual context creation; Mesa tests select software rendering. D-Bus tests require `dbus-daemon`, PipeWire tests require `pipewire` and `wireplumber`; each suite owns private services rather than using the user's session. The rendering and service tests are added in S6, S9, and S10; S1 installs their runner.
+
+Deterministic rendering fixtures load `assets/fonts/test/InterVariable.ttf`, with its pinned source and OFL license beside it, instead of system fonts. Golden PNG differences are written under `target/golden-diff/` and retained by the render CI job.
