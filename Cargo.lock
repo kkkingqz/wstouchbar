@@ -2769,11 +2769,13 @@ dependencies = [
 name = "touchbar-ui"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "cosmic-text",
  "naga",
  "resvg",
  "serde",
  "serde_json",
+ "sha2",
  "taffy",
 ]
 
