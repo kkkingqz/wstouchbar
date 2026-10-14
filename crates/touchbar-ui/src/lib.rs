@@ -33,7 +33,7 @@ pub use foundation::{
     SemanticNode, SemanticRole, TextAlign, TextMeasurement, resolve_flex_row,
 };
 pub use symbols::{Symbol, SymbolCatalog};
-pub use text::TextEngine;
+pub use text::{TextEngine, ensure_default_font};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {

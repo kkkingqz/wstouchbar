@@ -149,3 +149,24 @@ fn logical_array_and_implicit_all_budgets_are_enforced() {
         );
     }
 }
+
+#[test]
+fn explicit_manifest_assets_are_strict_and_bounded() {
+    let base = "id='images'\nversion='1'\napi='1'\nname='Images'\ndescription=''\n";
+    let asset = "\n[[assets]]\nid='speaker'\nfile='assets/speaker.svg'\nkind='symbolic-svg'\nwidth=32\nheight=32\n";
+    let manifest =
+        touchbar_sets::PluginManifest::from_toml("plugin.toml", &format!("{base}{asset}")).unwrap();
+    assert_eq!(manifest.assets.len(), 1);
+    for invalid in [
+        asset.replace("32", "0"),
+        asset.replace("32", "4096"),
+        asset.replace("symbolic-svg", "svg"),
+        asset.replace("assets/speaker.svg", "../outside.svg"),
+        format!("{asset}{asset}"),
+    ] {
+        assert!(
+            touchbar_sets::PluginManifest::from_toml("plugin.toml", &format!("{base}{invalid}"))
+                .is_err()
+        );
+    }
+}

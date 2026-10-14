@@ -20,6 +20,8 @@ pub struct PluginManifest {
     pub sets: Vec<SetEntry>,
     #[serde(default)]
     pub profiles: Vec<ProfileEntry>,
+    #[serde(default)]
+    pub assets: Vec<AssetEntry>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,3 +47,19 @@ pub mod config;
 
 /// Explicit manifest entry for a profile document (D85).
 pub type ProfileEntry = SetEntry;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetEntry {
+    pub id: String,
+    pub file: String,
+    pub kind: AssetKind,
+    pub width: u32,
+    pub height: u32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AssetKind {
+    Png,
+    SymbolicSvg,
+}

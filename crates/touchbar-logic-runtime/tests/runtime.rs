@@ -306,3 +306,28 @@ fn module_retention_evicts_old_records_without_disposing_live_instances() {
     create(&mut r, 3, "failed");
     init(&mut r, 3);
 }
+
+#[test]
+fn loader_describe_shares_create_cache_and_keeps_guest_state_fresh() {
+    let mut r = runtime();
+    load(&mut r, "loader", fixtures::ECHO);
+    let description = r.describe(&plugin(), "loader").unwrap();
+    assert_eq!(
+        r.take_logs()
+            .iter()
+            .filter(|l| l.message == "echo.describe")
+            .count(),
+        1
+    );
+    assert_eq!(r.describe(&plugin(), "loader").unwrap(), description);
+    match r.create(Timestamp(0), id(90), &plugin(), "loader", &set(), &key()) {
+        Input::LogicDescribed {
+            description: actual,
+            ..
+        } => assert_eq!(actual, description),
+        other => panic!("{other:?}"),
+    }
+    assert!(r.take_logs().is_empty());
+    init(&mut r, 90);
+    assert!(r.describe(&plugin(), "missing").is_err());
+}

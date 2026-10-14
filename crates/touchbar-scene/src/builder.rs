@@ -663,7 +663,11 @@ impl Builder<'_> {
                     .clone(),
                 opacity: 1.0,
                 fit: ui::ImageFit::Contain,
-                tint: ui::ImageTint::Mask(color),
+                tint: if self.doc.asset_kinds.get(&asset) == Some(&touchbar_sets::AssetKind::Png) {
+                    ui::ImageTint::None
+                } else {
+                    ui::ImageTint::Mask(color)
+                },
                 label: label.into(),
             })
         } else {

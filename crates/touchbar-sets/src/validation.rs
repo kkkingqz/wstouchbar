@@ -128,6 +128,30 @@ impl PluginManifest {
                 "duplicate profile file",
             )?;
         }
+        check(self.assets.len() <= 256, "assets", "too many assets")?;
+        let mut ids = BTreeSet::new();
+        let mut pixels = 0u64;
+        for (i, asset) in self.assets.iter().enumerate() {
+            let p = format!("assets[{i}]");
+            reference(&asset.id, &field(&p, "id"))?;
+            relative(&asset.file, &field(&p, "file"))?;
+            check(
+                ids.insert(&asset.id),
+                &field(&p, "id"),
+                "duplicate asset id",
+            )?;
+            pixels += u64::from(asset.width) * u64::from(asset.height);
+            check(
+                asset.width > 0 && asset.height > 0 && asset.width <= 2048 && asset.height <= 2048,
+                &p,
+                "raster dimensions must be 1..=2048 pixels",
+            )?;
+            check(
+                pixels <= 16 * 1024 * 1024,
+                "assets",
+                "asset rasters exceed 16M pixels per plugin",
+            )?;
+        }
         let mut requires = BTreeSet::new();
         for (i, id) in self.requires.iter().enumerate() {
             check(
@@ -140,6 +164,24 @@ impl PluginManifest {
     }
 }
 impl SetFile {
+    pub fn validate_assets(&self, ids: &BTreeSet<&str>) -> Result<()> {
+        let mut check = |node: &LayoutNode, path: &str| {
+            if let Some(asset) = &node.asset {
+                check(
+                    ids.contains(asset.as_str()),
+                    &field(path, "asset"),
+                    "undeclared asset",
+                )?;
+            }
+            Ok(())
+        };
+        self.layout.walk("layout", &mut check)?;
+        for panel in &self.panels {
+            panel.layout.walk("panel", &mut check)?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<()> {
         check(self.version == 1, "version", "unsupported set version")?;
         reference(&self.id, "id")?;

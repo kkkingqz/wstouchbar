@@ -2637,7 +2637,10 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "inotify",
+ "png",
+ "rustix",
  "serde",
+ "serde_json",
  "sha2",
  "thiserror 2.0.21",
  "toml",
@@ -2646,8 +2649,11 @@ dependencies = [
  "touchbar-logic-runtime",
  "touchbar-model",
  "touchbar-profiles",
+ "touchbar-scene",
  "touchbar-sets",
  "touchbar-ui",
+ "touchbar-wasm-fixtures",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2776,8 +2782,8 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
- "sha2",
  "touchbar-core",
+ "touchbar-loader",
  "touchbar-logic-runtime",
  "touchbar-model",
  "touchbar-sets",
@@ -2810,6 +2816,8 @@ dependencies = [
 name = "touchbarctl"
 version = "0.1.0"
 dependencies = [
+ "cosmic-text",
+ "png",
  "rustix",
  "serde",
  "serde_json",
@@ -2820,6 +2828,7 @@ dependencies = [
  "touchbar-logic-runtime",
  "touchbar-model",
  "touchbar-scene",
+ "touchbar-ui",
 ]
 
 [[package]]

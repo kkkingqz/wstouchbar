@@ -8,3 +8,5 @@ Inter Variable, unmodified, from the official [Inter repository](https://github.
 - License: SIL Open Font License 1.1, complete text in [OFL.txt](OFL.txt).
 
 Render fixtures load only this font, never the host font database. Keep font bytes fixed when comparing golden files; an update requires deliberate regeneration of affected goldens.
+
+The offline renderer also embeds these licensed font bytes as a fallback when no system fonts are available. `ensure_default_font` preserves a nonempty caller database; golden fixtures continue to inject only Inter.

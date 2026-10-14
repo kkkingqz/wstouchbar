@@ -31,6 +31,7 @@ impl ActualRenderer {
                 Arc::new(SetDocument {
                     file,
                     assets: BTreeMap::new(),
+                    asset_kinds: BTreeMap::new(),
                 }),
             );
         }
@@ -48,6 +49,7 @@ impl ActualRenderer {
                 Arc::new(SetDocument {
                     file,
                     assets: BTreeMap::new(),
+                    asset_kinds: BTreeMap::new(),
                 }),
             );
         }

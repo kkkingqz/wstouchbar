@@ -127,7 +127,7 @@ impl HostState {
 }
 struct Module {
     pre: bindings::LogicPre<HostState>,
-    description: Option<LogicDescription>,
+    description: Option<Result<LogicDescription, String>>,
 }
 struct Instance {
     store: Store<HostState>,
@@ -255,6 +255,61 @@ impl Runtime {
             .map_err(|e| fault_reason(&e, store.data().limiter.denied))?;
         Ok(Instance { store, api })
     }
+    /// Probe once per revision without creating a live instance or reading persistence.
+    pub fn describe(
+        &mut self,
+        plugin: &PluginId,
+        revision: &str,
+    ) -> Result<LogicDescription, LoadError> {
+        let _active = self.ticker.enter();
+        self.describe_inner(plugin, revision).map_err(LoadError)
+    }
+    fn describe_inner(
+        &mut self,
+        plugin: &PluginId,
+        revision: &str,
+    ) -> Result<LogicDescription, String> {
+        let key = (plugin.clone(), revision.to_owned());
+        let module = self
+            .modules
+            .get(&key)
+            .ok_or_else(|| format!("module {plugin}@{revision} is not loaded"))?
+            .as_ref()
+            .map_err(ToString::to_string)?;
+        if let Some(cached) = &module.description {
+            return cached.clone();
+        }
+        let pre = module.pre.clone();
+        let outcome = (|| {
+            // Describe uses a separate instance: all live instances start with identical guest state.
+            let mut probe = self.instantiate(&pre)?;
+            probe
+                .store
+                .set_epoch_deadline(self.config.limits.logic_hard_ms.max(1));
+            let start = Instant::now();
+            let result = probe
+                .api
+                .wstouchbar_logic_api()
+                .call_describe(&mut probe.store)
+                .map(translation::description_from);
+            self.logs.extend(probe.store.data_mut().take_logs());
+            if start.elapsed() > Duration::from_millis(self.config.limits.logic_soft_ms) {
+                self.logs
+                    .push(LogRecord::warning("describe exceeded soft deadline"));
+            }
+            let description = result.map_err(|e| {
+                format!(
+                    "describe: {}",
+                    fault_reason(&e, probe.store.data().limiter.denied)
+                )
+            })?;
+            Ok(description)
+        })();
+        if let Some(Ok(module)) = self.modules.get_mut(&key) {
+            module.description = Some(outcome.clone());
+        }
+        outcome
+    }
     pub fn create(
         &mut self,
         _now: Timestamp,
@@ -279,39 +334,7 @@ impl Runtime {
                 .as_ref()
                 .map_err(ToString::to_string)?;
             let pre = module.pre.clone();
-            let cached = module.description.clone();
-            let description = if let Some(description) = cached {
-                description
-            } else {
-                // Describe uses a separate instance: all live instances start with identical guest state.
-                let mut probe = self.instantiate(&pre)?;
-                probe
-                    .store
-                    .set_epoch_deadline(self.config.limits.logic_hard_ms.max(1));
-                let start = Instant::now();
-                let result = probe
-                    .api
-                    .wstouchbar_logic_api()
-                    .call_describe(&mut probe.store)
-                    .map(translation::description_from);
-                self.logs.extend(probe.store.data_mut().take_logs());
-                if start.elapsed() > Duration::from_millis(self.config.limits.logic_soft_ms) {
-                    self.logs
-                        .push(LogRecord::warning("describe exceeded soft deadline"));
-                }
-                let description = result.map_err(|e| {
-                    format!(
-                        "describe: {}",
-                        fault_reason(&e, probe.store.data().limiter.denied)
-                    )
-                })?;
-                if let Some(Ok(module)) =
-                    self.modules.get_mut(&(plugin.clone(), revision.to_owned()))
-                {
-                    module.description = Some(description.clone());
-                }
-                description
-            };
+            let description = self.describe_inner(plugin, revision)?;
             let persisted = self.persist.load(key);
             self.logs.extend(self.persist.take_logs());
             let persisted = persisted.map_err(|e| e.to_string())?;

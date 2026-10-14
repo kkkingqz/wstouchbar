@@ -12,6 +12,8 @@ touchbar-core.workspace = true
 touchbar-loader.workspace = true
 touchbar-scene.workspace = true
 touchbar-gl.workspace = true
+touchbar-ui.workspace = true
+cosmic-text.workspace = true
 touchbar-logic-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -20,3 +22,6 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+png.workspace = true

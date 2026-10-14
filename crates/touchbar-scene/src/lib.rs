@@ -16,6 +16,7 @@ use touchbar_ui::{DisplayList, Image};
 pub struct SetDocument {
     pub file: SetFile,
     pub assets: BTreeMap<String, Image>,
+    pub asset_kinds: BTreeMap<String, touchbar_sets::AssetKind>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct Documents {

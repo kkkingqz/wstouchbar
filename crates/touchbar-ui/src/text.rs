@@ -322,6 +322,20 @@ fn blend_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, sourc
     pixels[index + 3] = (output_alpha * 255.0).round() as u8;
 }
 
+/// Explicit shell policy for systems without installed fonts. Tests may still inject a fixed database.
+/// Rebuild the FontSystem after adding the fallback so its fallback indexes include the new face.
+pub fn ensure_default_font(fonts: FontSystem) -> FontSystem {
+    if fonts.db().faces().next().is_some() {
+        return fonts;
+    }
+    let (locale, mut db) = fonts.into_locale_and_db();
+    db.load_font_data(include_bytes!("../../../assets/fonts/test/InterVariable.ttf").to_vec());
+    db.set_sans_serif_family("Inter Variable");
+    db.set_serif_family("Inter Variable");
+    db.set_monospace_family("Inter Variable");
+    FontSystem::new_with_locale_and_db(locale, db)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

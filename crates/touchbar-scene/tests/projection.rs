@@ -42,6 +42,7 @@ fn fixture(layout: &str, state: StatePatch) -> (Scene, Documents) {
         Arc::new(SetDocument {
             file,
             assets: BTreeMap::new(),
+            asset_kinds: BTreeMap::new(),
         }),
     );
     let item = SceneItem {
@@ -880,4 +881,35 @@ fn raster_budget_failure_preserves_other_instance_frame() {
     assert_eq!(frame.faults[0].0.number, 1);
     assert_eq!(frame.layout.hit_map.len(), 1);
     assert_eq!(frame.layout.hit_map[0].widget.as_str(), "good");
+}
+#[test]
+fn manifest_png_preserves_color_while_symbolic_svg_uses_foreground_mask() {
+    let (scene, mut docs) = fixture("[layout]\nkind='image'\nasset='picture'\nwidth=100", vec![]);
+    let doc = Arc::make_mut(docs.sets.values_mut().next().unwrap());
+    doc.assets.insert(
+        "picture".into(),
+        touchbar_ui::Image::rgba8(1, 1, 1, 1, vec![255, 0, 0, 255]).unwrap(),
+    );
+    doc.asset_kinds
+        .insert("picture".into(), touchbar_sets::AssetKind::Png);
+    let png = draw(&scene, &docs);
+    assert!(png.faults.is_empty());
+    assert!(png.display_list.commands.iter().any(|c| matches!(
+        c,
+        touchbar_ui::DrawCommand::Image {
+            coloring: touchbar_ui::ImageColoring::Original,
+            ..
+        }
+    )));
+    Arc::make_mut(docs.sets.values_mut().next().unwrap())
+        .asset_kinds
+        .insert("picture".into(), touchbar_sets::AssetKind::SymbolicSvg);
+    let svg = draw(&scene, &docs);
+    assert!(svg.display_list.commands.iter().any(|c| matches!(
+        c,
+        touchbar_ui::DrawCommand::Image {
+            coloring: touchbar_ui::ImageColoring::Mask(_),
+            ..
+        }
+    )));
 }

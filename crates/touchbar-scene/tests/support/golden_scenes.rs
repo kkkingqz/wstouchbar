@@ -85,6 +85,7 @@ fn prepared(name: &str, wide: bool, esc: bool) -> (Scene, Documents) {
         Arc::new(SetDocument {
             file,
             assets: BTreeMap::new(),
+            asset_kinds: BTreeMap::new(),
         }),
     );
     (
