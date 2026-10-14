@@ -18,6 +18,8 @@ pub struct PluginManifest {
     pub requires: Vec<PluginId>,
     #[serde(default)]
     pub sets: Vec<SetEntry>,
+    #[serde(default)]
+    pub profiles: Vec<ProfileEntry>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,3 +40,8 @@ mod bindings;
 mod document;
 mod spec;
 mod validation;
+
+pub mod config;
+
+/// Explicit manifest entry for a profile document (D85).
+pub type ProfileEntry = SetEntry;

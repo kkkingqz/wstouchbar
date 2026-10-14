@@ -111,6 +111,23 @@ impl PluginManifest {
                 "duplicate set file",
             )?;
         }
+        let mut ids = BTreeSet::new();
+        let mut files = BTreeSet::new();
+        for (i, profile) in self.profiles.iter().enumerate() {
+            let p = format!("profiles[{i}]");
+            reference(&profile.id, &field(&p, "id"))?;
+            relative(&profile.file, &field(&p, "file"))?;
+            check(
+                ids.insert(&profile.id),
+                &field(&p, "id"),
+                "duplicate profile id",
+            )?;
+            check(
+                files.insert(&profile.file),
+                &field(&p, "file"),
+                "duplicate profile file",
+            )?;
+        }
         let mut requires = BTreeSet::new();
         for (i, id) in self.requires.iter().enumerate() {
             check(

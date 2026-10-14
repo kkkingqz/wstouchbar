@@ -1,0 +1,10 @@
+id = "profile-default"
+version = "1.0.0"
+api = "1"
+name = "Default Profile"
+description = "Temporary default composition for stage 3"
+requires = ["controls"]
+
+[[profiles]]
+id = "default"
+file = "profiles/default.toml"

@@ -2469,7 +2469,9 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "toml",
  "touchbar-model",
+ "touchbar-sets",
 ]
 
 [[package]]
@@ -2694,6 +2696,7 @@ name = "touchbar-profiles"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "serde_path_to_error",
  "thiserror 2.0.21",
  "toml",
