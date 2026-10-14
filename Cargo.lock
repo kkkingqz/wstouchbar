@@ -2618,6 +2618,9 @@ dependencies = [
 [[package]]
 name = "touchbar-layout"
 version = "0.1.0"
+dependencies = [
+ "touchbar-model",
+]
 
 [[package]]
 name = "touchbar-loader"
