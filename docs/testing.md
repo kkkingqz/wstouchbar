@@ -27,7 +27,7 @@ assert_eq!(replay.core.snapshot(), harness.snapshot());
 
 `FakeEffects` завершает запрос через `delay_ms` с заданным `result`; `with_handler` задаёт задержку и результат по конкретному эффекту. `timer.after` использует собственную длительность. Отмена убирает будущее завершение. Интервальные подписки выдают `Tick`; прочие данные доставляются через `subscription_after`. Отписка и потеря источника прекращают его будущие сообщения.
 
-`FakeRenderer` располагает виджеты слева направо и возвращает `Layout`, затем `FrameDone`. Ширина задаётся через `renderer.width`, иначе используется ширина виджета или 80 пикселей. Рендер поддерживает слои, панели и геометрию scrubber; сложная настоящая раскладка остаётся в этапе рендера.
+`FakeRenderer` располагает виджеты слева направо и возвращает `Layout`, затем `FrameDone`. Ширина задаётся через `renderer.width`, иначе используется ширина виджета или 80 пикселей. Рендер поддерживает слои, панели и геометрию scrubber; для настоящей раскладки `Harness::with_renderer` принимает реализацию FrameRenderer. В `touchbar-scene/tests/controls_geometry.rs` все сценарии L12 используют SceneRenderer и актуальную геометрию.
 
 `catalog().plugin(...).set(...).profile(...).build()` строит проверяемый каталог в коде. Для нестандартных случаев доступны `SetBuilder::spec` и `ProfileBuilder::spec`.
 
@@ -151,3 +151,14 @@ cargo xtask test-env pipewire
 Ignored environment tests use name prefixes `env_gpu_`, `env_dbus_`, and `env_pipewire_`. The commands validate prerequisites and run only the corresponding ignored tests with `--locked`; failures propagate as a nonzero exit status. GPU preflight inspects EGL/GLES runtime libraries through `ldconfig` on PATH, then tests check actual context creation; Mesa tests select software rendering. D-Bus tests require `dbus-daemon`, PipeWire tests require `pipewire` and `wireplumber`; each suite owns private services rather than using the user's session. The rendering and service tests are added in S6, S9, and S10; S1 installs their runner.
 
 Deterministic rendering fixtures load `assets/fonts/test/InterVariable.ttf`, with its pinned source and OFL license beside it, instead of system fonts. Golden PNG differences are written under `target/golden-diff/` and retained by the render CI job.
+
+## Эталоны кадров
+
+S5 сравнивает точные списки команд/ключи растров и карты попаданий: 54 комбинации девяти случаев, трёх размеров и двух тем. S6 использует те же функции подготовки кадров и сравнивает PNG на Mesa. Обновление выполняется явно:
+
+```sh
+UPDATE_GOLDEN=1 cargo test -p touchbar-scene --test goldens
+UPDATE_GOLDEN=1 cargo xtask test-env gpu
+```
+
+Обычный `cargo test` не требует EGL. `cargo xtask test-env gpu` запускает только ignored-тесты env_gpu_ с программной Mesa и surfaceless. Они проверяют все PNG, примитивы/маски/шейдеры, поворот, damage ≤8, отсутствие отправки неизменённых кадров, независимые поверхности и время жизни EGL display. PNG допускают разницу канала до 2; не более 0,1% пикселей могут превысить её. При расхождении actual и непрозрачный красный diff сохраняются в target/golden-diff.

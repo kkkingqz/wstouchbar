@@ -2609,11 +2609,18 @@ dependencies = [
 name = "touchbar-gl"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "cosmic-text",
  "glow",
  "khronos-egl",
  "naga",
  "png",
+ "serde_json",
  "thiserror 2.0.21",
+ "touchbar-core",
+ "touchbar-model",
+ "touchbar-scene",
+ "touchbar-sets",
  "touchbar-ui",
 ]
 

@@ -22,8 +22,9 @@ pub struct ScrubberItemState {
 pub use asset::{SvgAsset, SvgRasterizer};
 pub use controls::{ContinuousValue, MeterStyle, ScrubberCellStyle, SliderStyle, TinyGraphStyle};
 pub use effect::{
-    EffectProgram, MAX_EFFECT_NODES, MAX_EFFECT_PARAMETERS, MAX_EFFECT_PROGRAMS,
-    MAX_EFFECT_SOURCE_BYTES, ShaderEffect,
+    ENTRY_POINT as EFFECT_ENTRY_POINT, EffectProgram, MAX_EFFECT_NODES, MAX_EFFECT_PARAMETERS,
+    MAX_EFFECT_PROGRAMS, MAX_EFFECT_SOURCE_BYTES, ShaderEffect,
+    UNIFORM_NAME as EFFECT_UNIFORM_NAME,
 };
 pub use foundation::{
     CanvasColor, CanvasCommand, CanvasLinearGradient, CanvasPaint, ColorRole, CrossAxisAlignment,
