@@ -6,7 +6,6 @@ pub struct FakeRenderer {
     pub delay_ms: u64,
     pub frames: Vec<(SurfaceId, Generation)>,
     widths: BTreeMap<String, f32>,
-    pub(crate) hits: BTreeMap<SurfaceId, HitMap>,
 }
 struct Geometry {
     hits: HitMap,
@@ -230,5 +229,33 @@ pub fn headless(id: u64) -> SurfaceInfo {
             inject_keys: true,
             ..SurfaceCaps::default()
         },
+    }
+}
+
+/// Geometry producer for virtual-time scenarios. Input recognition stays in Core.
+pub trait FrameRenderer {
+    fn render_layout(
+        &mut self,
+        info: &SurfaceInfo,
+        generation: Generation,
+        scene: &Scene,
+        now: Timestamp,
+    ) -> Input;
+    fn delay_ms(&self) -> u64 {
+        0
+    }
+}
+impl FrameRenderer for FakeRenderer {
+    fn render_layout(
+        &mut self,
+        info: &SurfaceInfo,
+        generation: Generation,
+        scene: &Scene,
+        _now: Timestamp,
+    ) -> Input {
+        self.render(info, generation, scene)
+    }
+    fn delay_ms(&self) -> u64 {
+        self.delay_ms
     }
 }

@@ -523,7 +523,7 @@ fn validate_node(
         &field(path, "children"),
         "node does not support these children",
     )?;
-    if node.kind == LayoutKind::Repeat {
+    if matches!(node.kind, LayoutKind::Repeat | LayoutKind::Scrubber) {
         for (n, b) in [
             ("repeat_from", node.repeat_from.is_some()),
             ("repeat_key", node.repeat_key.is_some()),
@@ -532,7 +532,7 @@ fn validate_node(
             check(
                 b,
                 &field(path, n),
-                "repeat requires source, key and template",
+                "repeat or scrubber requires source, key and template",
             )?;
         }
     } else {
@@ -541,7 +541,39 @@ fn validate_node(
             ("repeat_key", node.repeat_key.is_some()),
             ("template", node.template.is_some()),
         ] {
-            check(!b, &field(path, n), "repeat properties require repeat node")?;
+            check(
+                !b,
+                &field(path, n),
+                "repeat properties require repeat or scrubber node",
+            )?;
+        }
+    }
+    if node.kind == LayoutKind::Scrubber {
+        check(
+            node.value.is_none(),
+            &field(path, "value"),
+            "scrubber uses records, not scalar value",
+        )?;
+        check(
+            node.value_from.is_none(),
+            &field(path, "value_from"),
+            "scrubber uses records, not scalar value",
+        )?;
+        if let Some(template) = &node.template {
+            template.walk(&field(path, "template"), &mut |node, path| {
+                check(
+                    !matches!(
+                        node.kind,
+                        LayoutKind::Button
+                            | LayoutKind::Slider
+                            | LayoutKind::Scrubber
+                            | LayoutKind::Key
+                            | LayoutKind::KeyRow
+                    ),
+                    path,
+                    "scrubber template must be visual; interactions belong to scrubber",
+                )
+            })?;
         }
     }
     if let Some(k) = &node.repeat_key {

@@ -18,7 +18,7 @@ struct Job {
     guard: Guard,
     repeat: Option<u64>,
 }
-pub struct Harness<H: LogicHost = FakeLogic> {
+pub struct Harness<H: LogicHost = FakeLogic, R: FrameRenderer = FakeRenderer> {
     core: Core,
     catalog: Catalog,
     checker: Option<InvariantChecker>,
@@ -36,7 +36,8 @@ pub struct Harness<H: LogicHost = FakeLogic> {
     pub logic: H,
     pub host_errors: Vec<String>,
     pub effects: FakeEffects,
-    pub renderer: FakeRenderer,
+    pub renderer: R,
+    hits: BTreeMap<SurfaceId, HitMap>,
 }
 impl Harness<FakeLogic> {
     pub fn new(config: CoreConfig) -> Self {
@@ -45,6 +46,11 @@ impl Harness<FakeLogic> {
 }
 impl<H: LogicHost> Harness<H> {
     pub fn with_logic(config: CoreConfig, logic: H) -> Self {
+        Self::with_renderer(config, logic, FakeRenderer::default())
+    }
+}
+impl<H: LogicHost, R: FrameRenderer> Harness<H, R> {
+    pub fn with_renderer(config: CoreConfig, logic: H, renderer: R) -> Self {
         let logic_timeout_ms = config.logic_hard_ms;
         let core = Core::new(config);
         let recorder = Recorder::new(&core);
@@ -66,7 +72,8 @@ impl<H: LogicHost> Harness<H> {
             logic,
             host_errors: vec![],
             effects: FakeEffects::default(),
-            renderer: FakeRenderer::default(),
+            renderer,
+            hits: BTreeMap::new(),
         }
     }
     pub fn enable_invariant_checks(&mut self) {
@@ -181,7 +188,7 @@ impl<H: LogicHost> Harness<H> {
             surface, hit_map, ..
         } = &input
         {
-            self.renderer.hits.insert(*surface, hit_map.clone());
+            self.hits.insert(*surface, hit_map.clone());
         }
         let outputs = self
             .recorder
@@ -310,8 +317,10 @@ impl<H: LogicHost> Harness<H> {
                     .find(|s| s.info.id == surface)
                     .expect("render surface")
                     .info;
-                let layout = self.renderer.render(&info, generation, &scene);
-                let at = self.clock.after(self.renderer.delay_ms);
+                let layout = self
+                    .renderer
+                    .render_layout(&info, generation, &scene, self.clock);
+                let at = self.clock.after(self.renderer.delay_ms());
                 self.schedule(at, layout, Guard::Always, None);
                 self.schedule(
                     at,
@@ -370,7 +379,6 @@ impl<H: LogicHost> Harness<H> {
             "surface has no current display layout"
         );
         let hit = self
-            .renderer
             .hits
             .get(&surface)
             .into_iter()
@@ -431,7 +439,7 @@ impl<H: LogicHost> Harness<H> {
             "valid drag values and positive step count"
         );
         self.hit(surface, widget);
-        let rect = self.renderer.hits[&surface]
+        let rect = self.hits[&surface]
             .iter()
             .filter(|h| h.widget.as_str() == widget)
             .max_by_key(|h| h.plane)

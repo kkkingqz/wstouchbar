@@ -10,7 +10,7 @@ mod foundation;
 mod painter;
 mod symbols;
 mod text;
-pub use display_list::{DisplayList, DrawCommand, EffectUniforms, Resource};
+pub use display_list::{DisplayList, DrawCommand, EffectUniforms, Resource, physical_rect};
 pub use painter::CpuPainter;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -175,7 +175,7 @@ assets/fonts/test/        шрифт для тестов и эталонов, с
 Чистый построитель кадра:
 
 ```rust
-let frame = scene_renderer.frame(&surface, &core_scene, &documents, &theme, &mut fonts)?;
+let frame = scene_renderer.frame(&surface, &core_scene, &documents, theme, &mut fonts, now, motion_policy)?;
 // frame.display_list — для touchbar-gl или для сравнения в тестах
 // frame.layout       — hit_map, representations, scrubbers, slots, presentation для Input::Layout
 ```
@@ -189,6 +189,7 @@ let frame = scene_renderer.frame(&surface, &core_scene, &documents, &theme, &mut
   - значение ползунка из `interactions` во время перетаскивания, нажатие и выбор;
   - `canvas_from`, `shader-effect`, motion;
   - лимиты узлов и текста — как `HostLimits` исходного проекта.
+- **Список scrubber (D99).** Обязательны `repeat_from`, `repeat_key` и визуальный `template`; scalar `value/value_from` запрещены. Жесты и `Selected` принадлежат самому scrubber.
 - **Изображения** узла `image` берутся из документов каталога. Загрузчик читает их из каталога плагина (S7).
 - **Единицы.** Цепочка «набор → профиль → поверхность», у слоя — «набор → поверхность». Округление по 16-surfaces.
 - **Статусы:** `Loading` — заготовка без содержимого, `Faulted` — заглушка, `Hidden` не рисуется.

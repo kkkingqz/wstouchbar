@@ -4,6 +4,7 @@ label = "Function keys"
 
 [layout]
 kind = "key-row"
+width = "100%w"
 keys = [
   # { key = "esc", width = 150 },
   { key = "f1" }, { key = "f2" }, { key = "f3" }, { key = "f4" },

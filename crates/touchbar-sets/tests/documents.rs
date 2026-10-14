@@ -108,13 +108,22 @@ invalid!(
 #[test]
 fn selected_handler_checks_declared_action_and_kind() {
     use touchbar_model::{ActionDescription, LogicDescription};
-    let source = set("[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'");
+    let source = set(
+        "[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text'}",
+    );
     for kinds in [None, Some(vec![ActionKind::Activated])] {
         let description = LogicDescription {
             actions: kinds
                 .map(|kinds| vec![("choose".into(), ActionDescription { kinds, value: None })])
                 .unwrap_or_default(),
-            state: vec![],
+            state: vec![touchbar_model::StateField {
+                name: "rows".into(),
+                kind: touchbar_model::FieldKind::Records(vec![(
+                    "id".into(),
+                    touchbar_model::ScalarKind::Text,
+                )]),
+                persist: false,
+            }],
         };
         let error =
             SetFile::from_toml_with_description("picker.toml", &source, &description).unwrap_err();
@@ -536,7 +545,6 @@ fn set_file_round_trips_all_layout_kinds() {
         "slider",
         "meter",
         "progress",
-        "scrubber",
         "fixed-space",
         "flexible-space",
     ];
@@ -548,6 +556,7 @@ fn set_file_round_trips_all_layout_kinds() {
         assert_eq!(SetFile::from_toml("roundtrip.toml", &encoded).unwrap(), doc);
     }
     for body in [
+        "[layout]\nkind='scrubber'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text',text_from='record.label'}",
         "[layout]\nkind='repeat'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text',text_from='record.label'}",
         "[layout]\nkind='responsive'\nvariants=[{representation='full',minimum_width=10,layout={kind='text'}}]",
         "[layout]\nkind='canvas'\ncanvas_from='drawing'",

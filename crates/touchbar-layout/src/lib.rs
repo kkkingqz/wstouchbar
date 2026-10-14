@@ -236,7 +236,7 @@ impl fmt::Display for LayoutError {
             Self::DuplicateItem(id) => write!(formatter, "duplicate item identifier {id}"),
             Self::InvalidSizing(id) => write!(
                 formatter,
-                "item {id} must have a nonzero min width with min <= preferred <= max"
+                "item {id} must have finite nonnegative grow and min <= preferred <= max"
             ),
             Self::InvalidFlexibleSpace { element } => {
                 write!(
@@ -538,7 +538,6 @@ fn validate_item(item: &ItemSpec, identifiers: &mut BTreeSet<ItemId>) -> Result<
     }
     if !item.grow.is_finite()
         || item.grow < 0.0
-        || item.min_width == 0
         || item.min_width > item.preferred_width
         || item.preferred_width > item.max_width
     {

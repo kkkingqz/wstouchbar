@@ -13,13 +13,20 @@ fn toml_scrubber_selection_reaches_logic_with_record_key() {
                 value: None,
             },
         )],
-        state: vec![StateField {
-            name: "chosen".into(),
-            kind: FieldKind::Scalar(ScalarKind::Text),
-            persist: false,
-        }],
+        state: vec![
+            StateField {
+                name: "rows".into(),
+                kind: FieldKind::Records(vec![("key".into(), ScalarKind::Text)]),
+                persist: false,
+            },
+            StateField {
+                name: "chosen".into(),
+                kind: FieldKind::Scalar(ScalarKind::Text),
+                persist: false,
+            },
+        ],
     };
-    let set = SetFile::from_toml_with_description("picker.toml", "version=1\nid='main'\nlabel='Picker'\n[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'\n", &description).unwrap();
+    let set = SetFile::from_toml_with_description("picker.toml", "version=1\nid='main'\nlabel='Picker'\n[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'\nrepeat_from='rows'\nrepeat_key='key'\ntemplate={kind='text'}\n", &description).unwrap();
     let manifest = PluginManifest::from_toml("plugin.toml", "id='owner'\nversion='1.0.0'\napi='1'\nname='Picker'\ndescription='Selection'\nlogic='logic.wasm'").unwrap();
     let spec = set.to_spec(&manifest).unwrap();
     let c = catalog()

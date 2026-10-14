@@ -31,7 +31,7 @@ pub fn panel_bounds(
     if surface.width == 0
         || surface.height == 0
         || !contains(surface, owner)
-        || !contains(surface, anchor)
+        || (placement == PanelPlacement::Anchored && !contains(surface, anchor))
     {
         return Err(LayoutError::InvalidPanelGeometry);
     }
