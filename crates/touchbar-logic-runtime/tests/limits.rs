@@ -60,6 +60,7 @@ fn table_case(initial: u64, grow: bool) {
             .is_none()
     );
     success(call(&mut r, 2, LogicCall::Handle(LogicEvent::Shown)));
+    quiet_fault_dispose(&mut r, id(1));
 }
 fn id(n: u64) -> InstanceId {
     InstanceId {
@@ -158,6 +159,7 @@ fn real_traps_timeouts_memory_and_stack_faults_are_isolated() {
         success(init(&mut r, 2, action_name));
         success(init(&mut r, 3, ""));
         fault(call(&mut r, 1, action(action_name)), reason);
+        quiet_fault_dispose(&mut r, id(1));
         assert!(
             call(&mut r, 1, LogicCall::Handle(LogicEvent::Shown))
                 .input
@@ -176,6 +178,7 @@ fn oversized_updates_fault_but_host_inputs_preserve_instances() {
     create(&mut r, 1, "budget", f::BUDGET);
     create(&mut r, 2, "echo", f::ECHO);
     fault(init(&mut r, 1, ""), "budget");
+    quiet_fault_dispose(&mut r, id(1));
     success(init(&mut r, 2, ""));
     let rejected = init(&mut r, 2, &"x".repeat(5000));
     assert!(
@@ -257,4 +260,107 @@ fn soft_deadline_warns_without_interrupting_call() {
             .any(|l| l.level == LogLevel::Warn && l.message.contains("soft"))
     );
     success(response);
+}
+
+#[test]
+fn fault_dispose_acknowledges_only_failed_generation_once() {
+    let mut r = runtime(limits());
+    create(&mut r, 1, "bad", f::TRAP);
+    success(init(&mut r, 1, "trap"));
+    fault(call(&mut r, 1, action("trap")), "trap");
+    r.take_logs();
+    let next = InstanceId {
+        generation: Generation(2),
+        ..id(1)
+    };
+    r.dispose(next);
+    assert!(
+        r.take_logs()
+            .iter()
+            .any(|l| l.message.contains("unknown instance"))
+    );
+    let set: SetRef = "owner/test".parse().unwrap();
+    let key = PersistKey {
+        plugin: "owner".parse().unwrap(),
+        surface: "touchbar".parse().unwrap(),
+        scope: PersistScope::Layer(set.clone()),
+    };
+    assert!(matches!(
+        r.create(Timestamp(0), next, &"bad".parse().unwrap(), "1", &set, &key),
+        Input::LogicDescribed { .. }
+    ));
+    success(r.call(
+        Timestamp(0),
+        next,
+        CallId(20),
+        &LogicCall::Init {
+            config: "trap".into(),
+            persisted: vec![],
+        },
+    ));
+    quiet_fault_dispose(&mut r, id(1));
+    success(r.call(
+        Timestamp(0),
+        next,
+        CallId(21),
+        &LogicCall::Handle(LogicEvent::Shown),
+    ));
+    r.dispose(id(1));
+    assert!(
+        r.take_logs()
+            .iter()
+            .any(|l| l.message.contains("unknown instance"))
+    );
+}
+fn quiet_fault_dispose(r: &mut Runtime, failed: InstanceId) {
+    r.take_logs();
+    r.dispose(failed);
+    assert!(
+        !r.take_logs()
+            .iter()
+            .any(|l| l.message.contains("unknown instance"))
+    );
+}
+#[test]
+fn failed_create_dispose_is_quiet_but_duplicate_create_does_not_leave_ack() {
+    let mut r = runtime(limits());
+    let plugin: PluginId = "bad".parse().unwrap();
+    let set: SetRef = "owner/test".parse().unwrap();
+    let key = PersistKey {
+        plugin: "owner".parse().unwrap(),
+        surface: "touchbar".parse().unwrap(),
+        scope: PersistScope::Layer(set.clone()),
+    };
+    for revision in ["missing", "invalid"] {
+        if revision == "invalid" {
+            r.load_module(plugin.clone(), revision, b"invalid")
+                .unwrap_err();
+        }
+        assert!(matches!(
+            r.create(Timestamp(0), id(1), &plugin, revision, &set, &key),
+            Input::InstanceFault { .. }
+        ));
+        quiet_fault_dispose(&mut r, id(1));
+    }
+    create(&mut r, 1, "good", f::ECHO);
+    assert!(matches!(
+        r.create(
+            Timestamp(0),
+            id(1),
+            &"good".parse().unwrap(),
+            "1",
+            &set,
+            &key
+        ),
+        Input::InstanceFault { .. }
+    ));
+    success(init(&mut r, 1, ""));
+    r.dispose(id(1));
+    r.take_logs();
+    r.dispose(id(1));
+    assert!(
+        r.take_logs()
+            .iter()
+            .any(|l| l.message.contains("unknown instance"))
+    );
 }

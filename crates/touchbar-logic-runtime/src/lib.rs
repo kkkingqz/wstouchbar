@@ -13,7 +13,7 @@ use limits::{MemoryLimiter, fault_reason};
 mod persist;
 pub use persist::*;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -143,6 +143,7 @@ pub struct Runtime {
     config: RuntimeConfig,
     modules: BTreeMap<(PluginId, String), Result<Module, LoadError>>,
     instances: BTreeMap<InstanceId, Instance>,
+    pending_fault_disposes: BTreeSet<InstanceId>,
     persist: Box<dyn PersistStore>,
     logs: Vec<LogRecord>,
     ticker: EpochTicker,
@@ -178,6 +179,7 @@ impl Runtime {
             config,
             modules: BTreeMap::new(),
             instances: BTreeMap::new(),
+            pending_fault_disposes: BTreeSet::new(),
             persist,
             logs: vec![],
             ticker,
@@ -315,6 +317,7 @@ impl Runtime {
             let persisted = persisted.map_err(|e| e.to_string())?;
             let live = self.instantiate(&pre)?;
             self.instances.insert(instance, live);
+            self.pending_fault_disposes.remove(&instance);
             Ok::<_, String>((description, persisted))
         })();
         match outcome {
@@ -323,7 +326,11 @@ impl Runtime {
                 description,
                 persisted,
             },
-            Err(reason) => Input::InstanceFault { instance, reason },
+            Err(reason) => {
+                // Core still acknowledges a failed creation with DisposeInstance.
+                self.pending_fault_disposes.insert(instance);
+                Input::InstanceFault { instance, reason }
+            }
         }
     }
     pub fn call(
@@ -393,6 +400,7 @@ impl Runtime {
                     },
                     Err(error) => {
                         self.instances.remove(&instance);
+                        self.pending_fault_disposes.insert(instance);
                         Input::LogicFault {
                             instance,
                             call,
@@ -408,6 +416,7 @@ impl Runtime {
             },
             Err(error) => {
                 self.instances.remove(&instance);
+                self.pending_fault_disposes.insert(instance);
                 Input::LogicFault {
                     instance,
                     call,
@@ -428,7 +437,9 @@ impl Runtime {
         }
     }
     pub fn dispose(&mut self, instance: InstanceId) {
-        if self.instances.remove(&instance).is_none() {
+        if self.instances.remove(&instance).is_none()
+            && !self.pending_fault_disposes.remove(&instance)
+        {
             self.logs.push(LogRecord::warning(format!(
                 "ignored dispose of unknown instance {instance:?}"
             )));
