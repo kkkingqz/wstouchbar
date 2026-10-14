@@ -18,7 +18,9 @@
 [приёмка](../validation/stage-1.md). Команды для обычных и длинных тестов —
 [testing.md](../testing.md). Следующие этапы пока описывают целевое поведение.
 
-Этап 2: [план](../plans/stage-2-logic.md).
+Этап 2: [план](../plans/stage-2-logic.md), [приёмка](../validation/stage-2.md).
+
+Этап 3: [план](../plans/stage-3-session.md).
 
 ## Паритет v1
 

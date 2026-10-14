@@ -37,6 +37,10 @@ file = "sets/volume.toml"
 [[sets]]
 id = "brightness"
 file = "sets/brightness.toml"
+
+# [[profiles]]                  # профили объявляются так же (D85)
+# id = "default"
+# file = "profiles/default.toml"
 ```
 
 Ссылки между плагинами пишутся как `plugin/id`: `controls/volume`, `profile-media/media`. Если плагин из `requires` отсутствует или выключен, слоты с его наборами остаются пустыми, а профиль продолжает работать. Это видно в `touchbarctl status` и `explain`.

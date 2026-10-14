@@ -91,9 +91,12 @@ Touch Bar для MacBook с чипом T2 под Linux. Основная маш�
 | `touchbar-logic-types` | Лимиты, бюджеты и валидация, общие для хоста и SDK | новый |
 | `touchbar-logic-runtime` | Wasmtime, биндинги WIT, epoch-прерывания | из `touchbar-plugin-host/src/sets` |
 | `touchbar-logic-sdk` | SDK для логики плагинов (guest) | перенос из `touchbar-logic-sdk` под новый WIT |
-| `touchbar-sets` | Манифест плагина и схема наборов TOML (этап 2), построение дерева UI из набора и состояния (этап 3) | из `touchbar-set-config` и `sets/renderer.rs` |
-| `touchbar-ui`, `touchbar-layout` | Отрисовка (GL, taffy, cosmic-text, resvg, шейдеры, canvas) и раскладка | перенос целиком |
-| `touchbar-profiles` | Формат профилей и выбор профиля | из `touchbar-profile-config` |
+| `touchbar-sets` | Манифест плагина и схема наборов TOML | из `touchbar-set-config` |
+| `touchbar-ui`, `touchbar-layout` | Узлы, раскладка, текст и SVG на CPU, список примитивов (без GL, D82); раскладка профиля | перенос |
+| `touchbar-scene` | Дерево UI из набора и состояния, кадр и `Layout` для ядра (D83) | из `sets/renderer.rs` |
+| `touchbar-gl` | EGL, GLES-рендер списка примитивов, шейдеры, частичная перерисовка (D82) | из `touchbar-ui` и `touchbar-sessiond/gpu.rs` |
+| `touchbar-profiles` | Формат профилей (выбор профиля — в ядре) | новый, идеи из `touchbar-profile-config` |
+| `touchbar-loader` | Поиск и загрузка плагинов, `config.toml`, ревизии, перезагрузка (D84) | новый |
 | `touchbar-apps` | Категории приложений из desktop-файлов | новый |
 | `touchbar-desktop` | API рабочего стола: трейт, факты, команды | новый |
 | `touchbar-desktop-gnome` | Бэкенд GNOME | из `touchbar-sessiond/context.rs`, переписан под своё расширение |
