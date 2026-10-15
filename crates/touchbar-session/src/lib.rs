@@ -9,3 +9,5 @@ mod session;
 pub use session::*;
 pub mod cli;
 pub mod driver;
+
+pub mod simulator;

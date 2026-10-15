@@ -1,6 +1,7 @@
 //! Native async-io loop. All runtime, GL and subprocess creation stays on this thread.
+use crate::simulator::{Simulator, SimulatorDesktop, SimulatorEvent};
 use crate::{cli::Cli, surface::*, *};
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Result, anyhow};
 use futures_lite::StreamExt;
 use std::{os::fd::AsFd, path::PathBuf, rc::Rc, sync::Arc, time::Duration};
 use touchbar_desktop::{DesktopBackend, FakeBackend, NullBackend};
@@ -42,6 +43,7 @@ enum Ready {
     Executor(Event),
     Backend(touchbar_desktop::BackendEvent),
     Loaded(touchbar_loader::PreparedLoad),
+    Simulator(SimulatorEvent),
     Watch,
     Wake,
     Stop,
@@ -51,10 +53,6 @@ pub fn run(cli: Cli) -> Result<()> {
     futures_lite::future::block_on(run_async(cli))
 }
 async fn run_async(cli: Cli) -> Result<()> {
-    ensure!(
-        !cli.simulator,
-        "Wayland simulator is implemented in S12; use --headless for now"
-    );
     let request = LoadRequest::standard(cli.plugins).map_err(|e| anyhow!(e))?;
     let startup = read_config(&request.config_file).unwrap_or_else(|error| {
         eprintln!("{error}; using default startup configuration");
@@ -63,8 +61,9 @@ async fn run_async(cli: Cli) -> Result<()> {
     let log = logging(&startup)?;
     let (desktop_tx, desktop_rx) = async_channel::bounded(512);
     let choice = cli.desktop.unwrap_or(startup.desktop);
+    let fake_desktop = (choice == DesktopChoice::Fake).then(FakeBackend::default);
     let mut desktop: Box<dyn DesktopBackend> = match choice {
-        DesktopChoice::Fake => Box::<FakeBackend>::default(),
+        DesktopChoice::Fake => Box::new(fake_desktop.clone().expect("fake backend")),
         DesktopChoice::Null => Box::<NullBackend>::default(),
         DesktopChoice::Gnome => {
             tracing::warn!("GNOME backend is not available before stage 5; using null");
@@ -79,6 +78,9 @@ async fn run_async(cli: Cli) -> Result<()> {
             Box::<NullBackend>::default()
         }
     };
+    if cli.simulator {
+        desktop = Box::new(SimulatorDesktop::new(desktop));
+    }
     let _desktop_events_lifetime = desktop_tx.clone();
     desktop.start(desktop_tx)?;
     let desktop: Rc<dyn DesktopBackend> = Rc::from(desktop);
@@ -105,6 +107,15 @@ async fn run_async(cli: Cli) -> Result<()> {
         let (surface, _) = HeadlessSurface::new(info);
         session.add_surface(Box::new(surface))?;
     }
+    let mut simulator = if cli.simulator {
+        let simulator = Simulator::connect(cli.surfaces).await?;
+        for surface in simulator.surfaces() {
+            session.add_surface(surface)?;
+        }
+        Some(simulator)
+    } else {
+        None
+    };
     let worker = Worker::new(session.compiler());
     let mut reload_pending = false;
     let mut loading = true;
@@ -138,6 +149,17 @@ async fn run_async(cli: Cli) -> Result<()> {
                         .await
                         .map(Ready::Backend)
                         .unwrap_or_else(|_| Ready::Failure("desktop event channel closed".into()))
+                };
+                let simulated = async {
+                    if let Some(simulator) = &mut simulator {
+                        simulator
+                            .next_event()
+                            .await
+                            .map(Ready::Simulator)
+                            .unwrap_or_else(|e| Ready::Failure(format!("Wayland simulator: {e}")))
+                    } else {
+                        std::future::pending::<Ready>().await
+                    }
                 };
                 let loaded = async {
                     worker
@@ -188,11 +210,14 @@ async fn run_async(cli: Cli) -> Result<()> {
                             loaded,
                             race(
                                 backend,
-                                race(executor, async {
-                                    watch.await.unwrap_or_else(|e| {
-                                        Ready::Failure(format!("configuration watcher: {e}"))
-                                    })
-                                }),
+                                race(
+                                    simulated,
+                                    race(executor, async {
+                                        watch.await.unwrap_or_else(|e| {
+                                            Ready::Failure(format!("configuration watcher: {e}"))
+                                        })
+                                    }),
+                                ),
                             ),
                         ),
                     ),
@@ -201,9 +226,36 @@ async fn run_async(cli: Cli) -> Result<()> {
             };
             match ready {
                 Ready::Stop => break,
-                Ready::Failure(error) => return Err(anyhow!(error)),
+                Ready::Failure(error) | Ready::Simulator(SimulatorEvent::Fault(error)) => {
+                    return Err(anyhow!(error));
+                }
                 Ready::Executor(event) => session.handle_event(event)?,
-                Ready::Backend(event) => session.handle_event(Event::Desktop(event))?,
+                Ready::Backend(mut event) => {
+                    if cli.simulator
+                        && let touchbar_desktop::BackendEvent::Ready(caps) = &mut event
+                    {
+                        caps.commands.extend([
+                            touchbar_desktop::CommandKind::Key,
+                            touchbar_desktop::CommandKind::Shortcut,
+                        ]);
+                    }
+                    session.handle_event(Event::Desktop(event))?;
+                }
+                Ready::Simulator(SimulatorEvent::Surface(event)) => {
+                    session.handle_event(Event::Surface(event))?
+                }
+                Ready::Simulator(SimulatorEvent::ToggleTheme) => {
+                    if let Some(fake) = &fake_desktop {
+                        let light = fake.fact(&"appearance.scheme".into())
+                            == Some(touchbar_model::FactValue::Text("light".into()));
+                        fake.set_fact(
+                            "appearance.scheme".into(),
+                            Some(touchbar_model::FactValue::Text(
+                                if light { "dark" } else { "light" }.into(),
+                            )),
+                        )?;
+                    }
+                }
                 Ready::Wake => {
                     session.handle_event(Event::Wake)?;
                     if watcher
@@ -246,6 +298,9 @@ async fn run_async(cli: Cli) -> Result<()> {
                 }
             }
 
+            if simulator.as_ref().is_some_and(Simulator::closed) {
+                break;
+            }
             if reload_pending && !loading {
                 worker.submit(request.clone()).map_err(|e| anyhow!(e))?;
                 loading = true;

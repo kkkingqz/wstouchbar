@@ -6,12 +6,12 @@ pub struct Cli {
     pub help: bool,
     pub plugins: Option<PathBuf>,
     pub simulator: bool,
-    pub surface: Option<SurfaceInfo>,
+    pub surfaces: Vec<SurfaceInfo>,
     pub headless: Option<SurfaceInfo>,
     pub desktop: Option<DesktopChoice>,
     pub fake_effects: bool,
 }
-pub const USAGE: &str = "touchbar-session [--plugins DIR] [--simulator --surface WxH@ppmm] [--headless WxH@ppmm] [--desktop=null|fake|auto|gnome] [--effects=fake]";
+pub const USAGE: &str = "touchbar-session [--plugins DIR] [--simulator --surface NAME=WxH@ppmm ...] [--headless WxH@ppmm] [--desktop=null|fake|auto|gnome] [--effects=fake]";
 impl Cli {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut cli = Self::default();
@@ -21,7 +21,7 @@ impl Cli {
             let (key, inline) = arg
                 .split_once('=')
                 .map_or((arg.as_str(), None), |(k, v)| (k, Some(v.to_owned())));
-            if !seen.insert(key.to_owned()) {
+            if key != "--surface" && !seen.insert(key.to_owned()) {
                 return Err(format!("duplicate option {key}"));
             }
             match key {
@@ -34,7 +34,38 @@ impl Cli {
                     match key {
                         "--plugins" => cli.plugins = Some(value.into()),
                         "--surface" => {
-                            cli.surface = Some(parse_surface(&value, SurfaceKind::Window)?)
+                            let (name, geometry) = value
+                                .split_once('=')
+                                .unwrap_or(("touchbar", value.as_str()));
+                            let name: SurfaceName =
+                                name.parse().map_err(|e: ModelError| e.to_string())?;
+                            let kind = if name.as_str() == "touchbar" {
+                                SurfaceKind::Touchbar
+                            } else if name.as_str().starts_with("window:") {
+                                SurfaceKind::Window
+                            } else {
+                                return Err(
+                                    "simulator surfaces must be touchbar or window:NAME".into()
+                                );
+                            };
+                            if cli.surfaces.len() >= 8
+                                || cli.surfaces.iter().any(|s| s.name == name)
+                            {
+                                return Err("duplicate simulator name or surface limit".into());
+                            }
+                            let mut info = parse_surface(geometry, kind)?;
+                            info.id = SurfaceId(
+                                u64::try_from(cli.surfaces.len()).expect("bounded surface count")
+                                    + 1,
+                            );
+                            info.name = name;
+                            info.caps = SurfaceCaps {
+                                watch_keys: kind == SurfaceKind::Touchbar,
+                                inject_keys: kind == SurfaceKind::Touchbar,
+                                damage: true,
+                                ..SurfaceCaps::default()
+                            };
+                            cli.surfaces.push(info);
                         }
                         "--headless" => {
                             cli.headless = Some(parse_surface(&value, SurfaceKind::Headless)?)
@@ -62,8 +93,14 @@ impl Cli {
         if cli.headless.is_some() && cli.simulator {
             return Err("choose headless or simulator".into());
         }
-        if cli.surface.is_some() && !cli.simulator {
+        if !cli.surfaces.is_empty() && !cli.simulator {
             return Err("--surface requires --simulator".into());
+        }
+        if cli.simulator && cli.surfaces.is_empty() {
+            let mut info = parse_surface("2008x60@6.2ppmm", SurfaceKind::Touchbar)?;
+            info.caps.inject_keys = true;
+            info.caps.damage = true;
+            cli.surfaces.push(info);
         }
         Ok(cli)
     }
