@@ -2512,8 +2512,13 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "async-io",
+ "async-lock",
  "futures-lite",
+ "libc",
+ "proptest",
  "rustix",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "touchbar-audio",
  "touchbar-core",

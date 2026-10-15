@@ -12,11 +12,15 @@ touchbar-core.workspace = true
 touchbar-desktop.workspace = true
 touchbar-audio.workspace = true
 async-io.workspace = true
+async-lock = "3"
 async-channel.workspace = true
 futures-lite.workspace = true
 zbus.workspace = true
-rustix.workspace = true
+rustix = { workspace = true, features = ["pipe"] }
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc = "0.2"
 
 [lints.rust]
 unsafe_code = "deny"
@@ -26,3 +30,16 @@ disallowed_types = "deny"
 cast_possible_truncation = "warn"
 cast_sign_loss = "warn"
 match_same_arms = "warn"
+
+[[bin]]
+name = "touchbar-spawn-helper"
+path = "src/bin/touchbar-spawn-helper.rs"
+test = false
+
+[[bin]]
+name = "touchbar-effects-test-helper"
+path = "tests/bin/fixture.rs"
+test = false
+
+[dev-dependencies]
+proptest.workspace = true
