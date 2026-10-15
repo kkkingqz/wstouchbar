@@ -42,3 +42,5 @@ workspace = true
 tempfile = "3"
 touchbar-testkit = { path = "../touchbar-testkit" }
 touchbar-wasm-fixtures.workspace = true
+xtask = { path = "../../xtask" }
+png.workspace = true

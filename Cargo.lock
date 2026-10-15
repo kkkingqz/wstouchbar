@@ -2773,6 +2773,7 @@ dependencies = [
  "async-signal",
  "cosmic-text",
  "futures-lite",
+ "png",
  "rustix",
  "serde",
  "serde_json",
@@ -2797,6 +2798,7 @@ dependencies = [
  "tracing-subscriber",
  "wayland-client",
  "wayland-protocols",
+ "xtask",
 ]
 
 [[package]]

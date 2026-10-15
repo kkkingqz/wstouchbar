@@ -156,6 +156,26 @@ impl Session {
         desktop: Rc<dyn DesktopBackend>,
         effects: Engine,
     ) -> Result<Self> {
+        Self::new_with_painter(
+            options,
+            clock,
+            persist,
+            desktop,
+            effects,
+            CpuPainter::new(touchbar_ui::ensure_default_font(
+                cosmic_text::FontSystem::new(),
+            )),
+        )
+    }
+    /// An explicit painter makes font selection/locale reproducible for embeddings.
+    pub fn new_with_painter(
+        options: SessionOptions,
+        clock: impl Clock + 'static,
+        persist: Box<dyn PersistStore>,
+        desktop: Rc<dyn DesktopBackend>,
+        effects: Engine,
+        painter: CpuPainter,
+    ) -> Result<Self> {
         let config = options.core_config();
         config.validate().map_err(|e| anyhow!(e))?;
         ensure!(
@@ -186,9 +206,7 @@ impl Session {
             documents: Documents::default(),
             options,
             renderer: SceneRenderer::default(),
-            painter: CpuPainter::new(touchbar_ui::ensure_default_font(
-                cosmic_text::FontSystem::new(),
-            )),
+            painter,
             gl: None,
             surfaces: BTreeMap::new(),
             work: VecDeque::new(),
