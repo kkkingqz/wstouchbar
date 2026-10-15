@@ -3750,6 +3750,15 @@ dependencies = [
 [[package]]
 name = "xtask"
 version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "touchbar-core",
+ "touchbar-loader",
+ "touchbar-logic-runtime",
+ "touchbar-model",
+ "touchbar-wasm-fixtures",
+ "wit-component 0.261.0",
+]
 
 [[package]]
 name = "yazi"

@@ -96,16 +96,45 @@ fn run(environment: Environment) -> Result<u8, String> {
 }
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("build-plugins") {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root");
+        let output = match &args[1..] {
+            [] => root.join("target/plugins"),
+            [flag, path] if flag == "--out" => path.into(),
+            _ => {
+                eprintln!("Usage: cargo xtask build-plugins [--out DIR]");
+                return ExitCode::from(2);
+            }
+        };
+        return match xtask::build_plugins(root, &output) {
+            Ok(()) => {
+                println!("Built plugins: {}", output.display());
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("xtask: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args.as_slice() == ["--help"] || args.as_slice() == ["-h"] {
-        println!("Usage: cargo xtask test-env gpu|dbus|pipewire");
+        println!(
+            "Usage: cargo xtask test-env gpu|dbus|pipewire; cargo xtask build-plugins [--out DIR]"
+        );
         return ExitCode::SUCCESS;
     }
     let [command, name] = args.as_slice() else {
-        eprintln!("Usage: cargo xtask test-env gpu|dbus|pipewire");
+        eprintln!(
+            "Usage: cargo xtask test-env gpu|dbus|pipewire; cargo xtask build-plugins [--out DIR]"
+        );
         return ExitCode::from(2);
     };
     let Some(environment) = Environment::parse(name).filter(|_| command == "test-env") else {
-        eprintln!("Usage: cargo xtask test-env gpu|dbus|pipewire");
+        eprintln!(
+            "Usage: cargo xtask test-env gpu|dbus|pipewire; cargo xtask build-plugins [--out DIR]"
+        );
         return ExitCode::from(2);
     };
     match run(environment) {
