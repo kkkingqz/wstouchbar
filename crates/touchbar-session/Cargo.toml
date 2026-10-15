@@ -7,6 +7,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+touchbar-ui.workspace = true
+cosmic-text.workspace = true
+touchbar-logic-types.workspace = true
+anyhow.workspace = true
+async-signal = "0.2.14"
 touchbar-model.workspace = true
 touchbar-core.workspace = true
 touchbar-loader.workspace = true
@@ -29,3 +36,8 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+touchbar-testkit = { path = "../touchbar-testkit" }
+touchbar-wasm-fixtures.workspace = true

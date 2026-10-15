@@ -11,6 +11,8 @@ mod instances;
 mod keys;
 mod layers;
 mod persistence;
+mod recording;
+pub use recording::*;
 mod presentations;
 mod profiles;
 use presentations::Presentation;

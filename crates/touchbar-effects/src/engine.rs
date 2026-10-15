@@ -76,6 +76,20 @@ pub struct Engine {
     prefer_sources: bool,
 }
 impl Engine {
+    /// Session termination cancels all owned sources and jobs; process workers
+    /// retain quota until the supervised groups have actually been reaped.
+    pub fn shutdown(&mut self) {
+        self.jobs.clear();
+        self.sources.clear();
+        self.pending.clear();
+    }
+    pub fn active_processes(&self) -> usize {
+        self.resources
+            .native
+            .as_ref()
+            .map_or(0, |c| c.spawn.active())
+    }
+
     pub fn native(
         config: Config,
         desktop: Rc<dyn DesktopBackend>,
