@@ -11,6 +11,13 @@ touchbar-model.workspace = true
 pipewire.workspace = true
 async-channel.workspace = true
 thiserror.workspace = true
+serde_json.workspace = true
+touchbar-desktop.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+futures-lite.workspace = true
+async-io.workspace = true
+tempfile = "3"

@@ -1,4 +1,7 @@
-//! Channel boundary for the native PipeWire worker (S10).
+pub mod model;
+mod native;
+pub use native::{NativeAudio, NativeOptions};
+// Channel boundary for the native PipeWire worker.
 use std::{future::Future, pin::Pin};
 use touchbar_model::*;
 pub type AudioFuture = Pin<Box<dyn Future<Output = EffectOutcome> + Send + 'static>>;
