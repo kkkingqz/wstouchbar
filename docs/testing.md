@@ -162,3 +162,26 @@ UPDATE_GOLDEN=1 cargo xtask test-env gpu
 ```
 
 Обычный `cargo test` не требует EGL. `cargo xtask test-env gpu` запускает только ignored-тесты env_gpu_ с программной Mesa и surfaceless. Они проверяют все PNG, примитивы/маски/шейдеры, поворот, damage ≤8, отсутствие отправки неизменённых кадров, независимые поверхности и время жизни EGL display. PNG допускают разницу канала до 2; не более 0,1% пикселей могут превысить её. При расхождении actual и непрозрачный красный diff сохраняются в target/golden-diff.
+
+## Этап 3: сессия и окружения
+
+```sh
+cargo xtask build-plugins
+cargo test -p touchbar-session --locked
+cargo xtask test-env gpu
+cargo xtask test-env dbus
+cargo xtask test-env pipewire
+# Дополнительно: транспорт окон в приватном Weston headless.
+cargo test -p touchbar-session --test simulator_private -- --ignored --nocapture
+```
+
+Обычные сквозные тесты используют настоящие wasm, загрузчик, SceneRenderer и FsStore; GPU не требуется. GPU-прогон повторяет сценарии с пиксельными поверхностями через GL сессии. JSON/PNG-эталоны находятся в `crates/touchbar-session/tests/golden`. Обновление явное: `UPDATE_GOLDEN=1`; после него обязателен отдельный прогон без флага. Подробнее — [тестирование](architecture/13-testing.md).
+
+Информационные замеры, без порогов задержки:
+
+```sh
+cargo run -p touchbar-session --example session_benchmark --release --locked
+cargo run -p touchbar-session --example session_benchmark --release --locked -- --render-node /dev/dri/renderD128
+```
+
+Пример использует временное дерево и поддельные эффекты; реальные громкость и микрофон не меняет. Он измеряет загрузку каталога с холодным и тёплым дисковым кешем, построение полного кадра через смену темы и обновление одного экземпляра, GL с полным damage и RSS собственного процесса. `fixture_first_frame_ms` включает подготовку временного дерева и шрифтов; это не время запуска бинарника сессии. Окружение и отдельные замеры нативного запуска фиксируются в [приёмке этапа 3](validation/stage-3.md).

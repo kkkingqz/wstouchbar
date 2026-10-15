@@ -212,7 +212,8 @@ fn cache_configuration_is_applied_and_invalid_paths_are_rejected() {
         Box::<MemoryStore>::default(),
     );
     assert!(bad.is_err(), "relative cache path must be rejected");
-    let root = std::env::temp_dir().join(format!("wstouchbar-l6-cache-{}", std::process::id()));
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("cache");
     let mut r = Runtime::new(
         RuntimeConfig {
             cache_dir: Some(root.clone()),
@@ -228,7 +229,10 @@ fn cache_configuration_is_applied_and_invalid_paths_are_rejected() {
         "compiled component must populate cache"
     );
     drop(r);
-    std::fs::remove_dir_all(root).unwrap();
+    // Wasmtime's detached worker may still finish queued statistics writes.
+    // Retire its absolute path before deleting the stable, renamed tree.
+    std::fs::rename(root, directory.path().join("retired")).unwrap();
+    directory.close().unwrap();
 }
 
 #[test]
