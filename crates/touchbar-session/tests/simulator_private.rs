@@ -96,6 +96,23 @@ fn env_wayland_two_windows_present_gl_shm_frames_and_shutdown_at_two_scales() {
             text.matches("simulator_surface_ready").count() == 2
                 && text.matches("simulator_frame_presented").count() >= 2
         });
+        futures_lite::future::block_on(async {
+            let socket = touchbar_control::socket_path(&runtime, true);
+            assert!(matches!(
+                touchbar_control::call(
+                    &socket,
+                    touchbar_control::Command::SimTheme {
+                        theme: touchbar_control::Theme::Light
+                    }
+                )
+                .await
+                .unwrap(),
+                touchbar_control::Reply::Ack
+            ));
+        });
+        wait_for(&mut session.0, &log, |text| {
+            text.matches("simulator_frame_presented").count() >= 4
+        });
         rustix::process::kill_process(
             rustix::process::Pid::from_raw(i32::try_from(session.0.id()).unwrap()).unwrap(),
             rustix::process::Signal::TERM,

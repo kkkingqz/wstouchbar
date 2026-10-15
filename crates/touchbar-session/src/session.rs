@@ -144,6 +144,8 @@ pub struct Session {
     failed_persist: Vec<FailedPersist>,
     persist_retry: Option<Timestamp>,
     metrics: Metrics,
+    pub(crate) last_calls: BTreeMap<InstanceId, Timestamp>,
+    latest_load_issues: Vec<LoadIssue>,
     stopped: bool,
 }
 impl Session {
@@ -198,6 +200,8 @@ impl Session {
             failed_persist: Vec::new(),
             persist_retry: None,
             metrics: Metrics::default(),
+            last_calls: BTreeMap::new(),
+            latest_load_issues: Vec::new(),
             stopped: false,
         };
         this.handle_event(Event::Input(Input::Locale(locale_from(|name| {
@@ -230,7 +234,7 @@ impl Session {
         &self.options.config
     }
     pub fn load_issues(&self) -> &[LoadIssue] {
-        self.loader.current().map_or(&[], |c| c.issues.as_slice())
+        &self.latest_load_issues
     }
     pub fn has_pending(&self) -> bool {
         !self.work.is_empty()
@@ -272,6 +276,7 @@ impl Session {
         }
         let previously_loaded = self.loader.current().is_some();
         let report = self.loader.accept(prepared, &self.core, &mut self.runtime);
+        self.latest_load_issues = report.issues.clone();
         if report.accepted {
             let accepted = self.loader.current().expect("accepted catalog");
             self.options.config = accepted.config.clone();
@@ -279,7 +284,8 @@ impl Session {
                 self.catalog = accepted.catalog.clone();
                 self.documents = accepted.documents.clone();
                 for surface in self.surfaces.values_mut() {
-                    surface.scene = None;
+                    // Keep the last scene until Core replaces it. A catalog
+                    // with no visual change need not emit another Render.
                     surface.queued = None;
                     surface.animate = false;
                     surface.pacer.stop_animation();
@@ -614,6 +620,7 @@ impl Session {
                 call,
                 invocation,
             } => {
+                self.last_calls.insert(instance, self.now());
                 let response = self.runtime.call(self.now(), instance, call, &invocation);
                 Self::sample(&mut self.metrics.wasm_ms, response.duration);
                 self.guest_logs(instance, response.logs);
@@ -622,6 +629,7 @@ impl Session {
                 }
             }
             Output::DisposeInstance { instance } => {
+                self.last_calls.remove(&instance);
                 self.runtime.dispose(instance);
                 self.runtime_logs(Some(instance));
                 self.diagnostics.forget(instance);

@@ -352,6 +352,7 @@ let frame = scene_renderer.frame(&surface, &core_scene, &documents, theme, &mut 
 
 ### S13. Управляющий сокет и touchbarctl
 
+- **Изоляция симулятора (D103).** Основная сессия сохраняет путь предложения 8. Симулятор использует `$XDG_RUNTIME_DIR/touchbar/simulator/session-control.sock` и корень состояния `$XDG_STATE_HOME/simulator`; `touchbarctl --simulator` выбирает его, `sim` выбирает автоматически.
 - **Сокет сессии** по предложению 8. Запросы: `Status`, `Dump`, `Reload`, `SimFact {name, value | null}`, `SimTheme`. Команды `Sim*` доступны только с `--desktop=fake`.
 - **`touchbarctl status [--json]`** показывает часть сведений из 12-diagnostics, которую знает сессия, по поверхностям:
   - активный профиль и путь выбора, слои, панель;

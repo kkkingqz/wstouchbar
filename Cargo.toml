@@ -12,6 +12,7 @@ members = ["crates/touchbar-model", "crates/touchbar-bindings", "crates/touchbar
     "crates/touchbar-effects",
     "crates/touchbar-audio",
     "crates/touchbar-session",
+    "crates/touchbar-control",
     "crates/touchbarctl",
     "xtask",
 ]
@@ -57,6 +58,7 @@ touchbar-desktop = { path = "crates/touchbar-desktop" }
 touchbar-effects = { path = "crates/touchbar-effects" }
 touchbar-audio = { path = "crates/touchbar-audio" }
 touchbar-session = { path = "crates/touchbar-session" }
+touchbar-control = { path = "crates/touchbar-control" }
 touchbarctl = { path = "crates/touchbarctl" }
 cosmic-text = "0.19"
 resvg = { version = "0.48.1", default-features = false }

@@ -1,0 +1,18 @@
+[package]
+name = "touchbar-control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+touchbar-model.workspace = true
+rustix.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+[lints]
+workspace = true
+[dev-dependencies]
+tempfile = "3"

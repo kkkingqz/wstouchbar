@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+futures-lite.workspace = true
+touchbar-control.workspace = true
 touchbar-model.workspace = true
 touchbar-core.workspace = true
 touchbar-loader.workspace = true
@@ -25,3 +27,5 @@ workspace = true
 
 [dev-dependencies]
 png.workspace = true
+tempfile = "3"
+async-io.workspace = true

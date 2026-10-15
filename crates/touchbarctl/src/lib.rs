@@ -1,4 +1,4 @@
-//! Offline commands. The session control protocol is added by S13.
+//! Offline rendering and private session control.
 use std::{collections::BTreeSet, path::PathBuf};
 use touchbar_core::{InstanceStatus, Scene, SceneItem};
 use touchbar_loader::{LoadRequest, offline_set, read_bounded};
@@ -158,3 +158,6 @@ pub fn render_png(options: &RenderOptions) -> Result<(), String> {
         .ok_or("renderer produced no frame")?;
     output.save_png(&options.output).map_err(|e| e.to_string())
 }
+
+mod control;
+pub use control::*;

@@ -44,10 +44,26 @@ enum Ready {
     Backend(touchbar_desktop::BackendEvent),
     Loaded(touchbar_loader::PreparedLoad),
     Simulator(SimulatorEvent),
+    Control(touchbar_control::Incoming),
     Watch,
     Wake,
     Stop,
     Failure(String),
+}
+/// Poll transport once between core slices, preserving incomplete clients in Server.
+pub async fn poll_control(
+    server: &mut touchbar_control::Server,
+    session: &mut Session,
+    fake: Option<&FakeBackend>,
+) -> Result<bool> {
+    if let Some(incoming) = futures_lite::future::poll_once(server.next()).await {
+        let incoming = incoming?;
+        let (reply, reload) = session.control(incoming.request.command.clone(), fake);
+        server.respond(incoming, reply)?;
+        Ok(reload)
+    } else {
+        Ok(false)
+    }
 }
 pub fn run(cli: Cli) -> Result<()> {
     futures_lite::future::block_on(run_async(cli))
@@ -98,7 +114,9 @@ async fn run_async(cli: Cli) -> Result<()> {
             Arc::new(audio),
         )
     };
-    let home = state_home()?;
+    let home = touchbar_control::state_home(&state_home()?, cli.simulator);
+    let mut control =
+        touchbar_control::Server::bind(&touchbar_control::runtime_dir()?, cli.simulator)?;
     let clock = MonotonicClock::default();
     let options = SessionOptions::new(home.clone(), startup.clone());
     let store = touchbar_logic_runtime::FsStore::with_limit(home, options.limits.max_persist_bytes);
@@ -129,6 +147,10 @@ async fn run_async(cli: Cli) -> Result<()> {
     let result: Result<()> = async {
         loop {
             session.pump()?;
+            if session.has_pending() {
+                reload_pending |=
+                    poll_control(&mut control, &mut session, fake_desktop.as_ref()).await?;
+            }
             let deadline = session
                 .next_deadline()
                 .map(|t| Duration::from_millis(t.0))
@@ -160,6 +182,13 @@ async fn run_async(cli: Cli) -> Result<()> {
                     } else {
                         std::future::pending::<Ready>().await
                     }
+                };
+                let controlled = async {
+                    control
+                        .next()
+                        .await
+                        .map(Ready::Control)
+                        .unwrap_or_else(|e| Ready::Failure(format!("control socket: {e}")))
                 };
                 let loaded = async {
                     worker
@@ -211,7 +240,7 @@ async fn run_async(cli: Cli) -> Result<()> {
                             race(
                                 backend,
                                 race(
-                                    simulated,
+                                    race(simulated, controlled),
                                     race(executor, async {
                                         watch.await.unwrap_or_else(|e| {
                                             Ready::Failure(format!("configuration watcher: {e}"))
@@ -230,6 +259,12 @@ async fn run_async(cli: Cli) -> Result<()> {
                     return Err(anyhow!(error));
                 }
                 Ready::Executor(event) => session.handle_event(event)?,
+                Ready::Control(incoming) => {
+                    let (reply, reload) =
+                        session.control(incoming.request.command.clone(), fake_desktop.as_ref());
+                    reload_pending |= reload;
+                    control.respond(incoming, reply)?;
+                }
                 Ready::Backend(mut event) => {
                     if cli.simulator
                         && let touchbar_desktop::BackendEvent::Ready(caps) = &mut event

@@ -34,6 +34,10 @@ fn headless_binary_keeps_running_with_null_backend_reloads_and_handles_sigterm()
     let output = fs::File::create(&log).unwrap();
     let config = dir.path().join("config/touchbar");
     fs::create_dir_all(&config).unwrap();
+    let runtime = dir.path().join("runtime");
+    fs::create_dir(&runtime).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
     fs::create_dir_all(dir.path().join("plugins")).unwrap();
     fs::create_dir_all(dir.path().join("data/touchbar/plugins")).unwrap();
     let mut child = ChildGuard(
@@ -46,6 +50,7 @@ fn headless_binary_keeps_running_with_null_backend_reloads_and_handles_sigterm()
                 "--plugins",
             ])
             .arg(dir.path().join("plugins"))
+            .env("XDG_RUNTIME_DIR", &runtime)
             .env("XDG_CONFIG_HOME", dir.path().join("config"))
             .env("XDG_STATE_HOME", dir.path().join("state"))
             .env("XDG_CACHE_HOME", dir.path().join("cache"))
@@ -58,6 +63,44 @@ fn headless_binary_keeps_running_with_null_backend_reloads_and_handles_sigterm()
             .unwrap(),
     );
     wait_log(&mut child.0, &log, "catalog_loaded", 1);
+    futures_lite::future::block_on(async {
+        let path = touchbar_control::socket_path(&runtime, false);
+        let touchbar_control::Reply::Status(status) =
+            touchbar_control::call(&path, touchbar_control::Command::Status)
+                .await
+                .unwrap_or_else(|e| panic!("{e}: {}", fs::read_to_string(&log).unwrap()))
+        else {
+            panic!("status response")
+        };
+        assert_eq!(status["core"]["surfaces"].as_array().unwrap().len(), 1);
+        assert!(matches!(
+            touchbar_control::call(
+                &path,
+                touchbar_control::Command::SimTheme {
+                    theme: touchbar_control::Theme::Light
+                }
+            )
+            .await
+            .unwrap(),
+            touchbar_control::Reply::Error(_)
+        ));
+        let touchbar_control::Reply::Dump(file) =
+            touchbar_control::call(&path, touchbar_control::Command::Dump)
+                .await
+                .unwrap()
+        else {
+            panic!("dump response")
+        };
+        let dump: touchbar_core::ReplayDump =
+            serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+        dump.replay().unwrap();
+        assert!(matches!(
+            touchbar_control::call(&path, touchbar_control::Command::Reload)
+                .await
+                .unwrap(),
+            touchbar_control::Reply::Ack
+        ));
+    });
     fs::write(config.join("config.toml"), "log='debug'\n").unwrap();
     wait_log(&mut child.0, &log, "catalog_loaded", 2);
     rustix::process::kill_process(

@@ -11,3 +11,5 @@ pub mod cli;
 pub mod driver;
 
 pub mod simulator;
+
+pub mod control;

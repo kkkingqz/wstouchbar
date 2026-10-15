@@ -2480,6 +2480,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "touchbar-control"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "futures-lite",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "touchbar-model",
+]
+
+[[package]]
 name = "touchbar-controls"
 version = "0.1.0"
 dependencies = [
@@ -2766,6 +2779,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "touchbar-audio",
+ "touchbar-control",
  "touchbar-core",
  "touchbar-desktop",
  "touchbar-effects",
@@ -2839,12 +2853,16 @@ dependencies = [
 name = "touchbarctl"
 version = "0.1.0"
 dependencies = [
+ "async-io",
  "cosmic-text",
+ "futures-lite",
  "png",
  "rustix",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "touchbar-control",
  "touchbar-core",
  "touchbar-gl",
  "touchbar-loader",
