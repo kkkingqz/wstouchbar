@@ -175,7 +175,7 @@ impl ModeMachine {
                 message,
             } if generation == self.generation => {
                 self.error = Some(message);
-                if matches!(self.state, State::ToDisplay { .. }) {
+                if matches!(self.state, State::ToDisplay { .. } | State::Display { .. }) {
                     self.fail_display(&mut commands);
                 } else if matches!(self.state, State::ToNative { .. }) {
                     self.state = State::Native { safe: false };

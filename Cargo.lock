@@ -2894,7 +2894,10 @@ dependencies = [
 name = "touchbard"
 version = "0.1.0"
 dependencies = [
+ "async-io",
+ "futures-lite",
  "proptest",
+ "rustix",
  "serde",
  "tempfile",
  "touchbar-bindings",

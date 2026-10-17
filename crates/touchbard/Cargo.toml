@@ -16,6 +16,9 @@ cast_sign_loss = "warn"
 match_same_arms = "warn"
 
 [dependencies]
+rustix.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
 touchbar-protocol.workspace = true
 serde.workspace = true
 touchbar-bindings.workspace = true

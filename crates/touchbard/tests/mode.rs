@@ -205,3 +205,18 @@ proptest::proptest! {
         }
     }
 }
+#[test]
+fn failure_of_active_display_rolls_back_to_native_with_retry_budget() {
+    let mut m = native();
+    let generation = display(&mut m, 2000);
+    let commands = m.handle(
+        Timestamp(2100),
+        Input::Failed {
+            generation,
+            message: "device IO failed".into(),
+        },
+    );
+    assert!(matches!(m.state(), State::ToNative { .. }));
+    assert_eq!(m.failures(), 1);
+    assert!(matches!(commands.as_slice(), [Command::ToNative { .. }]));
+}

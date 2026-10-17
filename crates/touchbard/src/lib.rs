@@ -5,3 +5,5 @@ pub mod config;
 pub mod machine;
 
 pub use machine::{Command, Daemon, DisplayInfo, Event, Outgoing, Session};
+
+pub mod device;
