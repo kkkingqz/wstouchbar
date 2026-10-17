@@ -140,6 +140,7 @@ pub struct Session {
     commands: VecDeque<CommandFuture>,
     diagnostics: Diagnostics,
     recent: VecDeque<Record>,
+    log_context: BTreeMap<InstanceId, SetRef>,
     dumps: DumpStore,
     failed_persist: Vec<FailedPersist>,
     persist_retry: Option<Timestamp>,
@@ -214,6 +215,7 @@ impl Session {
             commands: VecDeque::new(),
             diagnostics: Diagnostics::default(),
             recent: VecDeque::new(),
+            log_context: BTreeMap::new(),
             dumps,
             failed_persist: Vec::new(),
             persist_retry: None,
@@ -615,6 +617,7 @@ impl Session {
                 persist_key,
                 ..
             } => {
+                self.log_context.insert(instance, set.clone());
                 let revision = self
                     .catalog
                     .plugins
@@ -651,6 +654,7 @@ impl Session {
                 self.runtime.dispose(instance);
                 self.runtime_logs(Some(instance));
                 self.diagnostics.forget(instance);
+                self.log_context.remove(&instance);
             }
             output @ (Output::StartEffect { .. }
             | Output::CancelEffect { .. }
@@ -906,16 +910,14 @@ impl Session {
     fn records(&mut self, records: Vec<Record>) {
         for record in records {
             let instance = record.instance;
-            let context = instance.and_then(|id| {
-                self.core
-                    .snapshot()
-                    .instances
-                    .into_iter()
-                    .find(|i| i.id == id)
-            });
-            let plugin = context.as_ref().map(|i| i.set.plugin.as_str());
-            let set = context.as_ref().map(|i| i.set.to_string());
-            macro_rules! emit {($level:expr)=>{{tracing::event!($level,instance=?instance,plugin=plugin.unwrap_or(""),set=set.as_deref().unwrap_or(""),suppressed=record.suppressed,message=%record.message);}}}
+            let context = instance.and_then(|id| self.log_context.get(&id));
+            macro_rules! emit {($level:expr)=>{{
+                if tracing::enabled!($level) {
+                    let plugin = context.map(|set| set.plugin.as_str()).unwrap_or("");
+                    let set = context.map(ToString::to_string).unwrap_or_default();
+                    tracing::event!($level,instance=?instance,plugin,set,suppressed=record.suppressed,message=%record.message);
+                }
+            }}}
             match record.level {
                 Level::Trace => emit!(tracing::Level::TRACE),
                 Level::Debug => emit!(tracing::Level::DEBUG),
@@ -1093,4 +1095,89 @@ pub fn locale_from(mut env: impl FnMut(&str) -> Option<String>) -> String {
         .into_iter()
         .find_map(|key| env(key).filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "C".into())
+}
+
+#[cfg(test)]
+mod log_context_tests {
+    use super::*;
+    use std::sync::Mutex;
+    #[derive(Clone)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn logs_keep_create_context_until_dispose_even_without_core_instance() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let buffer = Buffer(bytes.clone());
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || buffer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let dir = tempfile::tempdir().unwrap();
+            let desktop = Rc::new(touchbar_desktop::NullBackend::default());
+            let (effects, _) = Engine::fake(desktop.clone());
+            let mut session = Session::new(
+                SessionOptions::new(dir.path().into(), UserConfig::default()),
+                ManualClock::default(),
+                Box::<touchbar_logic_runtime::MemoryStore>::default(),
+                desktop,
+                effects,
+            )
+            .unwrap();
+            let instance = InstanceId {
+                number: 42,
+                generation: Generation(1),
+            };
+            session
+                .output(Output::CreateInstance {
+                    surface: SurfaceId(1),
+                    instance,
+                    plugin: "missing".parse().unwrap(),
+                    set: "missing/volume".parse().unwrap(),
+                    persist_key: PersistKey {
+                        plugin: "missing".parse().unwrap(),
+                        surface: "headless:test".parse().unwrap(),
+                        scope: PersistScope::Layer("missing/volume".parse().unwrap()),
+                    },
+                })
+                .unwrap();
+            session.records(vec![Record {
+                level: Level::Info,
+                instance: Some(instance),
+                message: "before-dispose".into(),
+                suppressed: 0,
+            }]);
+            session
+                .output(Output::DisposeInstance { instance })
+                .unwrap();
+            session.records(vec![Record {
+                level: Level::Info,
+                instance: Some(instance),
+                message: "after-dispose".into(),
+                suppressed: 0,
+            }]);
+        });
+        let logs = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+        let before = logs
+            .lines()
+            .find(|line| line.contains("before-dispose"))
+            .unwrap();
+        assert!(before.contains("plugin=\"missing\""), "{before}");
+        assert!(before.contains("set=\"missing/volume\""), "{before}");
+        let after = logs
+            .lines()
+            .find(|line| line.contains("after-dispose"))
+            .unwrap();
+        assert!(after.contains("plugin=\"\""), "{after}");
+    }
 }
