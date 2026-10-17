@@ -86,7 +86,7 @@ fn fn_mode_writer_is_pinned_under_selected_usb_and_rejects_replacements() {
 }
 #[test]
 #[ignore = "requires host root and uinput; grabs only the newly created test keyboard before emitting F5"]
-fn env_uinput_f5_roundtrip_and_device_removal() {
+fn env_hardware_uinput_f5_roundtrip_and_device_removal() {
     use touchbar_model::{KeyPhase, SystemKey};
     use touchbard::keys::Uinput;
     let mut output = Uinput::open(std::path::Path::new("/dev/uinput")).unwrap();

@@ -1036,3 +1036,60 @@ fn only_one_unconfirmed_frame_even_with_three_buffers() {
     );
     assert_eq!(d.owner(), None);
 }
+#[test]
+fn lost_acquired_inhibitor_retries_after_logind_reconnect_and_ignores_old_failure() {
+    let mut d = Daemon::new(Config::default(), false, Timestamp(0)).unwrap();
+    let gen1 = d
+        .handle(
+            Timestamp(0),
+            Event::Start {
+                preparing_sleep: false,
+            },
+        )
+        .into_iter()
+        .find_map(|c| {
+            if let Command::AcquireInhibitor { generation } = c {
+                Some(generation)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    d.handle(Timestamp(1), Event::InhibitorAcquired { generation: gen1 });
+    d.handle(
+        Timestamp(2),
+        Event::InhibitorFailed {
+            generation: gen1,
+            message: "logind disconnected".into(),
+        },
+    );
+    let gen2 = d
+        .handle(Timestamp(1000), Event::PrepareForSleep(false))
+        .into_iter()
+        .find_map(|c| {
+            if let Command::AcquireInhibitor { generation } = c {
+                Some(generation)
+            } else {
+                None
+            }
+        })
+        .expect("a lost acquired FD must be reacquired after reconnect");
+    assert!(gen2 > gen1);
+    d.handle(
+        Timestamp(1001),
+        Event::InhibitorAcquired { generation: gen2 },
+    );
+    d.handle(
+        Timestamp(1002),
+        Event::InhibitorFailed {
+            generation: gen1,
+            message: "stale loss".into(),
+        },
+    );
+    assert_eq!(d.inhibitor_error(), None);
+    assert!(
+        !d.handle(Timestamp(1003), Event::PrepareForSleep(false))
+            .iter()
+            .any(|c| matches!(c, Command::AcquireInhibitor { .. }))
+    );
+}

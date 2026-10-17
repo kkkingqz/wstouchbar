@@ -16,6 +16,7 @@ cast_sign_loss = "warn"
 match_same_arms = "warn"
 
 [dependencies]
+zbus.workspace = true
 drm.workspace = true
 drm-ffi.workspace = true
 async-channel.workspace = true
@@ -32,5 +33,6 @@ touchbar-sets.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+rustix = { workspace = true, features = ["pipe"] }
 proptest.workspace = true
 tempfile = "3"

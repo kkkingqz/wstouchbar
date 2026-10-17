@@ -2975,6 +2975,7 @@ dependencies = [
  "touchbar-protocol",
  "touchbar-sets",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]

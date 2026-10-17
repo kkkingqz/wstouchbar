@@ -262,8 +262,10 @@ impl Daemon {
                 generation,
                 message,
             } => {
-                if self.inhibitor_pending == Some(generation) {
+                if self.inhibitor_pending == Some(generation) || self.inhibitor == Some(generation)
+                {
                     self.inhibitor_pending = None;
+                    self.inhibitor = None;
                     self.inhibitor_error = Some(message);
                 }
             }
