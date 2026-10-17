@@ -17,3 +17,5 @@ pub mod probe;
 pub mod input;
 
 pub mod keys;
+
+pub mod backlight;

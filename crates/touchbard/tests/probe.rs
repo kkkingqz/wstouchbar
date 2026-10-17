@@ -35,3 +35,14 @@ fn env_hardware_probe_roundtrip() {
     assert_eq!(report["commits"].as_array().unwrap().len(), 4);
     assert_eq!(report["prime_cloexec"], true);
 }
+#[test]
+fn help_documents_crash_hand_back_and_extra_arguments_are_rejected() {
+    let help = Command::new(binary()).arg("--help").output().unwrap();
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--hand-back"));
+    let bad = Command::new(binary())
+        .args(["--hand-back", "unexpected"])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+}
