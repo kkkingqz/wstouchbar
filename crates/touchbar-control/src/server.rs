@@ -134,7 +134,10 @@ impl Server {
         }
         self.accept_retry = Some(async_io::Timer::after(Duration::from_millis(100)));
     }
-    pub async fn next(&mut self) -> io::Result<Incoming> {
+    /// Wait for a request or a recoverable transport diagnostic. `Ok(None)`
+    /// yields to the caller so it can drain `take_issues()` immediately.
+    /// The accept backoff survives returning or dropping this future.
+    pub async fn next(&mut self) -> io::Result<Option<Incoming>> {
         enum Ready {
             Client(io::Result<Option<Incoming>>),
             Accept(io::Result<UnixStream>),
@@ -184,7 +187,7 @@ impl Server {
                         Ok(stream) => stream,
                         Err(error) => {
                             self.retry_accept(&error);
-                            continue;
+                            return Ok(None);
                         }
                     };
                     self.clients.push(timed(async move {
@@ -211,9 +214,12 @@ impl Server {
                         Ok(Some(Incoming { request, stream }))
                     }));
                 }
-                Ready::Accept(Err(e)) if transient_accept(&e) => self.retry_accept(&e),
+                Ready::Accept(Err(e)) if transient_accept(&e) => {
+                    self.retry_accept(&e);
+                    return Ok(None);
+                }
                 Ready::Accept(Err(e)) => return Err(e),
-                Ready::Client(Ok(Some(request))) => return Ok(request),
+                Ready::Client(Ok(Some(request))) => return Ok(Some(request)),
                 Ready::Client(Ok(None) | Err(_)) => {} // Malformed/slow clients are isolated.
             }
         }

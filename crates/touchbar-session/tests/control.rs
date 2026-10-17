@@ -51,7 +51,7 @@ fn real_socket_status_dump_and_reload_use_session_and_retain_rejected_issues() {
         };
         let serving = async {
             loop {
-                let incoming = server.next().await.unwrap();
+                let incoming = server.next().await.unwrap().expect("control request");
                 let (reply, reload) = session.control(incoming.request.command.clone(), None);
                 if reload {
                     assert!(
@@ -154,4 +154,68 @@ fn control_can_be_polled_between_busy_core_slices_without_waiting_for_idle() {
         };
         futures_lite::future::or(client, serving).await;
     });
+}
+
+#[test]
+fn accept_failure_is_logged_without_other_session_events() {
+    const CHILD: &str = "TOUCHBAR_ACCEPT_LOG_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        assert!(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "accept_failure_is_logged_without_other_session_events",
+                    "--nocapture"
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap()
+                .success()
+        );
+        return;
+    }
+    use rustix::process::{Resource, getrlimit, setrlimit};
+    use std::{io::Write, os::unix::net::UnixStream};
+    let dir = tempfile::tempdir().unwrap();
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let desktop = Rc::new(touchbar_desktop::NullBackend::default());
+    let (effects, _) = touchbar_effects::Engine::fake(desktop.clone());
+    let mut session = Session::new(
+        SessionOptions::new(dir.path().into(), UserConfig::default()),
+        ManualClock::default(),
+        Box::<touchbar_logic_runtime::MemoryStore>::default(),
+        desktop,
+        effects,
+    )
+    .unwrap();
+    session.pump().unwrap();
+    assert!(!session.has_pending());
+    let mut server = Server::bind(dir.path(), false).unwrap();
+    let mut client = UnixStream::connect(socket_path(dir.path(), false)).unwrap();
+    client
+        .write_all(
+            &touchbar_control::encode(&touchbar_control::Request::new(Command::Status)).unwrap(),
+        )
+        .unwrap();
+    let limit = getrlimit(Resource::Nofile);
+    let mut reduced = limit;
+    reduced.current = Some(64);
+    setrlimit(Resource::Nofile, reduced).unwrap();
+    let mut files = Vec::new();
+    while let Ok(file) = fs::File::open("/dev/null") {
+        files.push(file);
+    }
+    let result =
+        futures_lite::future::block_on(driver::poll_control(&mut server, &mut session, None));
+    let logged = session.logs().iter().any(|record| {
+        matches!(record.level, diagnostics::Level::Warn)
+            && record.message.contains("control accept:")
+    });
+    drop(files);
+    setrlimit(Resource::Nofile, limit).unwrap();
+    assert!(!result.unwrap());
+    assert!(
+        logged,
+        "accept failure must be logged without a later session event"
+    );
 }

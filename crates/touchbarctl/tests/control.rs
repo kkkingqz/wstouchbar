@@ -91,7 +91,7 @@ fn binary_status_and_private_dump_use_real_control_transport() {
         });
         let serving = async {
             loop {
-                let incoming = server.next().await.unwrap();
+                let incoming = server.next().await.unwrap().expect("control request");
                 let reply = match incoming.request.command {
                     Command::Status => touchbar_control::Reply::Status(status.clone()),
                     Command::Dump => touchbar_control::Reply::Dump(source.clone()),

@@ -56,8 +56,14 @@ pub async fn poll_control(
     session: &mut Session,
     fake: Option<&FakeBackend>,
 ) -> Result<bool> {
-    if let Some(incoming) = futures_lite::future::poll_once(server.next()).await {
-        let incoming = incoming?;
+    let incoming = futures_lite::future::poll_once(server.next())
+        .await
+        .transpose()?
+        .flatten();
+    for issue in server.take_issues() {
+        session.warning(&issue);
+    }
+    if let Some(incoming) = incoming {
         let (reply, reload) = session.control(incoming.request.command.clone(), fake);
         server.respond(incoming, reply)?;
         Ok(reload)
@@ -193,7 +199,7 @@ async fn run_async(cli: Cli) -> Result<()> {
                     control
                         .next()
                         .await
-                        .map(Ready::Control)
+                        .map(|incoming| incoming.map_or(Ready::Wake, Ready::Control))
                         .unwrap_or_else(|e| Ready::Failure(format!("control socket: {e}")))
                 };
                 let loaded = async {

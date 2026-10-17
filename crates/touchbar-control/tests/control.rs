@@ -87,7 +87,7 @@ fn incomplete_client_does_not_block_other_requests_and_bad_versions_get_errors()
         slow.write_all(&[42]).unwrap();
         let client = async { call(&path, Command::Status).await.unwrap() };
         let serving = async {
-            let incoming = server.next().await.unwrap();
+            let incoming = server.next().await.unwrap().expect("control request");
             assert_eq!(incoming.request.command, Command::Status);
             server
                 .respond(incoming, Reply::Status(serde_json::json!({"ok":true})))
@@ -197,13 +197,24 @@ fn accept_resource_exhaustion_backs_off_and_recovers_without_losing_server() {
         files.push(file);
     }
     let first = futures_lite::future::block_on(futures_lite::future::poll_once(server.next()));
+    let during_backoff =
+        futures_lite::future::block_on(futures_lite::future::poll_once(server.next()));
     drop(files);
     setrlimit(Resource::Nofile, limit).unwrap();
-    assert!(first.is_none(), "transient accept must remain pending");
+    assert!(
+        matches!(first, Some(Ok(_))),
+        "transient accept must wake an idle driver"
+    );
+    assert!(
+        during_backoff.is_none(),
+        "diagnostic wake must preserve accept backoff"
+    );
+    assert_eq!(server.take_issues().len(), 1);
     let incoming = futures_lite::future::block_on(futures_lite::future::or(server.next(), async {
         async_io::Timer::after(Duration::from_secs(2)).await;
         Err(std::io::Error::other("server never recovered"))
     }))
-    .unwrap();
+    .unwrap()
+    .expect("control request after recovery");
     assert_eq!(incoming.request.command, Command::Status);
 }
