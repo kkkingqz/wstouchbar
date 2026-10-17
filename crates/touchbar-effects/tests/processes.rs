@@ -453,3 +453,74 @@ fn dead_helper_cannot_hold_quota_forever_through_inherited_pipes() {
     assert!(result.unwrap().is_err());
     assert_eq!(pool.active(), 0);
 }
+
+#[test]
+fn helper_death_with_full_line_channel_releases_quota_without_consumer() {
+    let t = Temp::new();
+    let path = t.0.join("pids");
+    let pool = pool();
+    let process = pool
+        .start(
+            owner(1),
+            spec(&["lines-idle", path.to_str().unwrap()]),
+            true,
+            None,
+        )
+        .unwrap();
+    let pids = wait_pids(&path);
+    let end = Instant::now() + Duration::from_secs(3);
+    while process.events.len() < 64 && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(process.events.len(), 64);
+    let status = fs::read_to_string(format!("/proc/{}/status", pids[0])).unwrap();
+    let helper: i32 = status
+        .lines()
+        .find_map(|line| line.strip_prefix("PPid:\t"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(helper).unwrap(),
+        rustix::process::Signal::KILL,
+    )
+    .unwrap();
+    let end = Instant::now() + Duration::from_secs(3);
+    while pool.active() != 0 && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(pool.active(), 0, "full line channel hid helper death");
+    assert!(finish(&process).is_err());
+    assert!(!is_running(pids[0]));
+}
+
+#[test]
+fn final_partial_line_delivery_obeys_exit_bound_and_reports_failure() {
+    let pool = pool();
+    let process = pool
+        .start(owner(1), spec(&["lines-tail"]), true, None)
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(3);
+    while pool.active() != 0 && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(pool.active(), 0);
+    assert!(
+        finish(&process).is_err(),
+        "undelivered tail must not be reported as success"
+    );
+}
+
+#[test]
+fn final_partial_line_timeout_is_reported() {
+    let pool = pool();
+    let process = pool
+        .start(owner(1), spec(&["lines-tail"]), true, Some(100))
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(3);
+    while pool.active() != 0 && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(pool.active(), 0);
+    assert_eq!(finish(&process), Err(EffectError::Timeout));
+}

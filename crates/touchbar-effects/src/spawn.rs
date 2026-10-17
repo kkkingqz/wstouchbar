@@ -177,7 +177,7 @@ impl SpawnPool {
         let mut child = command.spawn().map_err(failed)?;
         let pid = child.id();
         let setup = (|| {
-            let pidfd = native::pidfd(pid)?;
+            let pidfd = async_io::Async::new(native::pidfd(pid)?)?;
             native::nonblocking(&status)?;
             native::nonblocking(child.stdin.as_ref().expect("stdin"))?;
             native::nonblocking(child.stdout.as_ref().expect("stdout"))?;
@@ -378,29 +378,80 @@ fn send(
     control: &Mutex<Control>,
     wake: &async_io::Async<UnixStream>,
     deadline: Option<Instant>,
+    pidfd: &async_io::Async<File>,
+    drain_deadline: &mut Option<Instant>,
 ) -> bool {
-    if lock(control).cancel.is_some() {
-        return false;
+    enum Ready {
+        Sent(bool),
+        Cancel,
+        Deadline,
+        HelperExited,
     }
-    futures_lite::future::block_on(futures_lite::future::or(
-        async { events.send(event).await.is_ok() },
-        async {
+    let command_deadline = deadline;
+    let timed_out = || {
+        let mut c = lock(control);
+        if c.cancel.is_none() {
+            c.cancel = Some(EffectError::Timeout);
+            if !c.reaped {
+                native::signal_group(c.pid, libc::SIGTERM);
+            }
+        }
+    };
+    let mut delivery = std::pin::pin!(events.send(event));
+    loop {
+        if lock(control).cancel.is_some() {
+            return false;
+        }
+        if command_deadline.is_some_and(|at| Instant::now() >= at) {
+            timed_out();
+            return false;
+        }
+        if drain_deadline.is_some_and(|at| Instant::now() >= at) {
+            return false;
+        }
+        let deadline = command_deadline.into_iter().chain(*drain_deadline).min();
+        let waiting_for_helper = drain_deadline.is_none();
+        let ready = futures_lite::future::block_on(futures_lite::future::or(
+            async { Ready::Sent(delivery.as_mut().await.is_ok()) },
             futures_lite::future::or(
                 async {
                     let _ = wake.readable().await;
+                    Ready::Cancel
                 },
-                async {
-                    if let Some(at) = deadline {
-                        async_io::Timer::at(at).await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                },
-            )
-            .await;
-            false
-        },
-    ))
+                futures_lite::future::or(
+                    async {
+                        if let Some(at) = deadline {
+                            async_io::Timer::at(at).await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                        Ready::Deadline
+                    },
+                    async {
+                        if waiting_for_helper {
+                            let _ = pidfd.readable().await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                        Ready::HelperExited
+                    },
+                ),
+            ),
+        ));
+        match ready {
+            Ready::Sent(sent) => return sent,
+            Ready::Cancel => return false,
+            Ready::Deadline => {
+                if command_deadline.is_some_and(|at| Instant::now() >= at) {
+                    timed_out();
+                }
+                return false;
+            }
+            Ready::HelperExited => {
+                *drain_deadline = Some(Instant::now() + Duration::from_secs(1));
+            }
+        }
+    }
 }
 fn text(bytes: Vec<u8>, limit: usize) -> (String, bool) {
     let mut text = String::from_utf8_lossy(&bytes).into_owned();
@@ -426,7 +477,7 @@ fn run(
     events: async_channel::Sender<ProcessEvent>,
     lease: Arc<Lease>,
     wake: async_io::Async<UnixStream>,
-    pidfd: File,
+    pidfd: async_io::Async<File>,
 ) {
     let start = Instant::now();
     let deadline = timeout.map(|ms| start + Duration::from_millis(ms));
@@ -474,7 +525,8 @@ fn run(
                         match child.wait() {
                             Ok(_) => {
                                 exited = true;
-                                drain_deadline = Some(Instant::now() + Duration::from_secs(1));
+                                drain_deadline
+                                    .get_or_insert_with(|| Instant::now() + Duration::from_secs(1));
                                 c.reaped = true;
                             }
                             Err(e) => failure = Some(failed(e)),
@@ -532,6 +584,8 @@ fn run(
                             &control,
                             &wake,
                             deadline,
+                            &pidfd,
+                            &mut drain_deadline,
                         )
                     {
                         if lock(&control).cancel.is_none()
@@ -599,13 +653,18 @@ fn run(
     }
     if lines && !line.is_empty() && lock(&control).cancel.is_none() {
         let (value, _) = text(line, limit);
-        send(
+        if !send(
             &events,
             ProcessEvent::Line(value),
             &control,
             &wake,
             deadline,
-        );
+            &pidfd,
+            &mut drain_deadline,
+        ) && lock(&control).cancel.is_none()
+        {
+            failure.get_or_insert_with(|| failed("final line delivery failed"));
+        }
     }
     let cancel = lock(&control).cancel.clone();
     let result = if let Some(error) = failure {
@@ -685,7 +744,7 @@ mod tests {
         let (wake_read, wake_write) = UnixStream::pair().unwrap();
         native::nonblocking(&wake_write).unwrap();
         let wake_read = async_io::Async::new(wake_read).unwrap();
-        let pidfd = native::pidfd(pid).unwrap();
+        let pidfd = async_io::Async::new(native::pidfd(pid).unwrap()).unwrap();
         let control = Arc::new(Mutex::new(Control {
             pid,
             done: false,

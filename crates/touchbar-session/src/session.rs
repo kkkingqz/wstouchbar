@@ -574,6 +574,8 @@ impl Session {
                     state.animate = false;
                     state.scene = None;
                     state.queued = None;
+                    state.gl_retry = None;
+                    state.visual_dirty = false;
                     state.pacer.stop_animation();
                 }
             }
@@ -1378,6 +1380,31 @@ mod local_failure_tests {
         }
         assert!(!session.surfaces.contains_key(&SurfaceId(1)));
         assert!(session.surfaces.contains_key(&SurfaceId(2)));
+        session.dump().replay().unwrap();
+    }
+    #[test]
+    fn native_mode_cancels_gl_recovery_deadline() {
+        let (mut session, clock, _dir) = session(Rc::new(touchbar_desktop::NullBackend::default()));
+        session.options.gl =
+            touchbar_gl::Backend::RenderNode("/definitely-missing-touchbar-render-node".into());
+        let (pixels, _) = HeadlessSurface::new(info(1));
+        session.add_surface(Box::new(Pixels(pixels))).unwrap();
+        session.pump().unwrap();
+        session
+            .handle_event(Event::Input(Input::Mode {
+                surface: SurfaceId(1),
+                mode: Mode::Native,
+            }))
+            .unwrap();
+        session.pump().unwrap();
+        clock.advance(100);
+        session.handle_event(Event::Wake).unwrap();
+        session.pump().unwrap();
+        assert!(
+            session.next_deadline().is_none_or(|at| at > clock.now()),
+            "native surface retained expired retry"
+        );
+        assert!(!session.surfaces[&SurfaceId(1)].visual_dirty);
         session.dump().replay().unwrap();
     }
     struct ScriptRenderer {

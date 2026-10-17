@@ -23,6 +23,24 @@ fn main() {
                 std::io::stderr().write_all(&[b'b'; 8192]).unwrap();
             }
         }
+        Some("lines-idle") => {
+            std::fs::write(
+                &args[2],
+                format!("{} {}", std::process::id(), std::process::id()),
+            )
+            .unwrap();
+            for _ in 0..1000 {
+                println!("line");
+            }
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(Duration::from_secs(60));
+        }
+        Some("lines-tail") => {
+            for _ in 0..64 {
+                println!("line");
+            }
+            print!("tail");
+        }
         Some("many-lines") => {
             for _ in 0..1000 {
                 println!("line");
