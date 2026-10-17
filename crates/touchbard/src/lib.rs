@@ -13,3 +13,5 @@ pub mod worker;
 pub mod drm;
 
 pub mod probe;
+
+pub mod input;
