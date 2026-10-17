@@ -3,7 +3,7 @@ use rustix::fs::{FlockOperation, Mode, OFlags, flock, open};
 use std::{
     fs::{self, File, Permissions},
     io,
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
 };
 /// Shared by the daemon and all standalone hardware tools, including probe.
 pub struct ExclusiveDevice {
@@ -11,7 +11,12 @@ pub struct ExclusiveDevice {
 }
 impl ExclusiveDevice {
     pub fn acquire(roots: &Roots) -> io::Result<Self> {
-        fs::create_dir_all(&roots.run)?;
+        // Do not inherit group-write from the caller's umask (e.g. pkexec with 0002).
+        // Existing unsafe directories are still rejected below, never chmodded into trust.
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o755)
+            .create(&roots.run)?;
         let dir = fs::symlink_metadata(&roots.run)?;
         let uid = rustix::process::geteuid().as_raw();
         if !dir.is_dir() || dir.uid() != uid || dir.permissions().mode() & 0o022 != 0 {

@@ -449,3 +449,30 @@ fn native_safety_requires_no_remaining_appletbdrm_binding() {
     f.clear();
     assert!(discover(&f.roots).unwrap().unwrap().native_safe());
 }
+
+#[test]
+fn exclusive_guard_creates_safe_runtime_with_group_writable_umask() {
+    // umask is process-wide: isolate the inherited setting from parallel tests.
+    if std::env::var_os("TOUCHBAR_TEST_GROUP_UMASK").is_none() {
+        let status = std::process::Command::new("sh")
+            .args(["-c", "umask 0002; exec \"$@\"", "umask-test"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "exclusive_guard_creates_safe_runtime_with_group_writable_umask",
+                "--nocapture",
+            ])
+            .env("TOUCHBAR_TEST_GROUP_UMASK", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    let _guard = ExclusiveDevice::acquire(&f.roots).unwrap();
+    assert_eq!(
+        fs::metadata(&f.roots.run).unwrap().permissions().mode() & 0o022,
+        0
+    );
+}
