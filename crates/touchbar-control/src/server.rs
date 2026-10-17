@@ -23,6 +23,8 @@ pub struct Incoming {
 pub struct Server {
     listener: async_io::Async<UnixListener>,
     clients: Vec<Client>,
+    accept_retry: Option<async_io::Timer>,
+    issues: Vec<String>,
     path: PathBuf,
     identity: (u64, u64),
     _lock: File,
@@ -116,10 +118,21 @@ impl Server {
         Ok(Self {
             listener: async_io::Async::new(listener)?,
             clients: Vec::new(),
+            accept_retry: None,
+            issues: Vec::new(),
             path,
             identity: (metadata.dev(), metadata.ino()),
             _lock: lock,
         })
+    }
+    pub fn take_issues(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.issues)
+    }
+    fn retry_accept(&mut self, error: &io::Error) {
+        if self.issues.len() < 8 {
+            self.issues.push(format!("control accept: {error}"));
+        }
+        self.accept_retry = Some(async_io::Timer::after(Duration::from_millis(100)));
     }
     pub async fn next(&mut self) -> io::Result<Incoming> {
         enum Ready {
@@ -133,6 +146,12 @@ impl Server {
                         drop(self.clients.swap_remove(i));
                         return Poll::Ready(Ready::Client(result));
                     }
+                }
+                if let Some(timer) = &mut self.accept_retry {
+                    if Pin::new(timer).poll(cx).is_pending() {
+                        return Poll::Pending;
+                    }
+                    self.accept_retry = None;
                 }
                 if self.clients.len() < 8 {
                     loop {
@@ -161,7 +180,13 @@ impl Server {
                     if check_peer(&stream, rustix::process::getuid().as_raw()).is_err() {
                         continue;
                     }
-                    let mut stream = Stream::new(stream)?;
+                    let mut stream = match Stream::new(stream) {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            self.retry_accept(&error);
+                            continue;
+                        }
+                    };
                     self.clients.push(timed(async move {
                         let request: Request = match read_async(&mut stream).await {
                             Ok(r) => r,
@@ -186,6 +211,7 @@ impl Server {
                         Ok(Some(Incoming { request, stream }))
                     }));
                 }
+                Ready::Accept(Err(e)) if transient_accept(&e) => self.retry_accept(&e),
                 Ready::Accept(Err(e)) => return Err(e),
                 Ready::Client(Ok(Some(request))) => return Ok(request),
                 Ready::Client(Ok(None) | Err(_)) => {} // Malformed/slow clients are isolated.
@@ -216,4 +242,21 @@ impl Drop for Server {
             let _ = fs::remove_file(&self.path);
         }
     }
+}
+
+fn transient_accept(error: &io::Error) -> bool {
+    use rustix::io::Errno;
+    error.kind() == io::ErrorKind::Interrupted
+        || error.kind() == io::ErrorKind::ConnectionAborted
+        || error.raw_os_error().is_some_and(|code| {
+            [
+                Errno::MFILE,
+                Errno::NFILE,
+                Errno::NOBUFS,
+                Errno::NOMEM,
+                Errno::PROTO,
+            ]
+            .iter()
+            .any(|errno| errno.raw_os_error() == code)
+        })
 }

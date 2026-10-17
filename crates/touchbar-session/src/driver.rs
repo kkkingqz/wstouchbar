@@ -147,6 +147,9 @@ async fn run_async(cli: Cli) -> Result<()> {
     let result: Result<()> = async {
         loop {
             session.pump()?;
+            for issue in control.take_issues() {
+                session.warning(&issue);
+            }
             for issue in watcher.take_issues() {
                 session.warning(&format!("configuration watcher: {issue}"));
             }
@@ -286,12 +289,14 @@ async fn run_async(cli: Cli) -> Result<()> {
                     if let Some(fake) = &fake_desktop {
                         let light = fake.fact(&"appearance.scheme".into())
                             == Some(touchbar_model::FactValue::Text("light".into()));
-                        fake.set_fact(
+                        if let Err(error) = fake.set_fact(
                             "appearance.scheme".into(),
                             Some(touchbar_model::FactValue::Text(
                                 if light { "dark" } else { "light" }.into(),
                             )),
-                        )?;
+                        ) {
+                            session.warning(&format!("theme toggle: {error}"));
+                        }
                     }
                 }
                 Ready::Wake => {

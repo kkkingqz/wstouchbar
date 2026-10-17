@@ -160,3 +160,50 @@ fn old_version_gets_a_versioned_error_and_server_keeps_running() {
         .await;
     });
 }
+
+#[test]
+fn accept_resource_exhaustion_backs_off_and_recovers_without_losing_server() {
+    const CHILD: &str = "TOUCHBAR_ACCEPT_LIMIT_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        assert!(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "accept_resource_exhaustion_backs_off_and_recovers_without_losing_server",
+                    "--nocapture"
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap()
+                .success()
+        );
+        return;
+    }
+    use rustix::process::{Resource, getrlimit, setrlimit};
+    use std::os::unix::net::UnixStream;
+    let limit = getrlimit(Resource::Nofile);
+    let dir = tempfile::tempdir().unwrap();
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let mut server = Server::bind(dir.path(), false).unwrap();
+    let mut client = UnixStream::connect(socket_path(dir.path(), false)).unwrap();
+    client
+        .write_all(&encode(&Request::new(Command::Status)).unwrap())
+        .unwrap();
+    let mut reduced = limit;
+    reduced.current = Some(64);
+    setrlimit(Resource::Nofile, reduced).unwrap();
+    let mut files = Vec::new();
+    while let Ok(file) = fs::File::open("/dev/null") {
+        files.push(file);
+    }
+    let first = futures_lite::future::block_on(futures_lite::future::poll_once(server.next()));
+    drop(files);
+    setrlimit(Resource::Nofile, limit).unwrap();
+    assert!(first.is_none(), "transient accept must remain pending");
+    let incoming = futures_lite::future::block_on(futures_lite::future::or(server.next(), async {
+        async_io::Timer::after(Duration::from_secs(2)).await;
+        Err(std::io::Error::other("server never recovered"))
+    }))
+    .unwrap();
+    assert_eq!(incoming.request.command, Command::Status);
+}

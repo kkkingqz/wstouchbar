@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{Result, anyhow, ensure};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     future::Future,
     path::PathBuf,
     pin::Pin,
@@ -100,6 +100,8 @@ struct SurfaceState {
     visual_dirty: bool,
     queued: Option<(Generation, Scene)>,
     last: Option<Arc<PresentedFrame>>,
+    gl_failures: u8,
+    gl_retry: Option<Timestamp>,
 }
 #[derive(Default, Clone, Debug)]
 pub struct PumpStats {
@@ -115,6 +117,41 @@ pub struct Metrics {
 }
 type CommandFuture =
     Pin<Box<dyn Future<Output = Result<(), touchbar_desktop::DesktopError>> + 'static>>;
+struct KeyCommand {
+    key: SystemKey,
+    phase: KeyPhase,
+    recovery: bool,
+    future: Option<CommandFuture>,
+}
+trait PixelRenderer {
+    fn render(
+        &mut self,
+        surface: SurfaceId,
+        size: (u32, u32),
+        list: &touchbar_ui::DisplayList,
+    ) -> Result<Option<touchbar_gl::RenderedFrame>>;
+    fn remove_surface(&mut self, surface: SurfaceId);
+}
+impl PixelRenderer for touchbar_gl::Renderer {
+    fn render(
+        &mut self,
+        surface: SurfaceId,
+        size: (u32, u32),
+        list: &touchbar_ui::DisplayList,
+    ) -> Result<Option<touchbar_gl::RenderedFrame>> {
+        self.render(
+            surface,
+            size,
+            touchbar_gl::Orientation::Landscape,
+            list,
+            false,
+        )
+    }
+    fn remove_surface(&mut self, surface: SurfaceId) {
+        self.remove_surface(surface);
+    }
+}
+type RendererFactory = Box<dyn Fn(touchbar_gl::Backend) -> Result<Box<dyn PixelRenderer>>>;
 struct FailedPersist {
     key: PersistKey,
     fields: StatePatch,
@@ -133,11 +170,13 @@ pub struct Session {
     options: SessionOptions,
     renderer: SceneRenderer,
     painter: CpuPainter,
-    gl: Option<touchbar_gl::Renderer>,
+    gl: Option<Box<dyn PixelRenderer>>,
+    gl_factory: RendererFactory,
     surfaces: BTreeMap<SurfaceId, SurfaceState>,
     work: VecDeque<Work>,
     timers: BTreeMap<TimerId, Timestamp>,
-    commands: VecDeque<CommandFuture>,
+    commands: VecDeque<KeyCommand>,
+    pressed_keys: BTreeSet<SystemKey>,
     diagnostics: Diagnostics,
     recent: VecDeque<Record>,
     log_context: BTreeMap<InstanceId, SetRef>,
@@ -209,10 +248,12 @@ impl Session {
             renderer: SceneRenderer::default(),
             painter,
             gl: None,
+            gl_factory: Box::new(|backend| Ok(Box::new(touchbar_gl::Renderer::new(backend)?))),
             surfaces: BTreeMap::new(),
             work: VecDeque::new(),
             timers: BTreeMap::new(),
             commands: VecDeque::new(),
+            pressed_keys: BTreeSet::new(),
             diagnostics: Diagnostics::default(),
             recent: VecDeque::new(),
             log_context: BTreeMap::new(),
@@ -350,6 +391,8 @@ impl Session {
                 visual_dirty: false,
                 queued: None,
                 last: None,
+                gl_failures: 0,
+                gl_retry: None,
             },
         );
         Ok(())
@@ -361,28 +404,68 @@ impl Session {
         self.timers
             .values()
             .copied()
-            .chain(self.surfaces.values().filter_map(|s| s.pacer.deadline()))
+            .chain(
+                self.surfaces
+                    .values()
+                    .filter_map(|s| s.gl_retry.or_else(|| s.pacer.deadline())),
+            )
             .chain(self.diagnostics.deadline())
             .chain(self.persist_retry)
             .min()
     }
     pub async fn next_executor(&mut self) -> Event {
         futures_lite::future::or(async { Event::Input(self.effects.next().await) }, async {
-            futures_lite::future::poll_fn(|cx| {
+            let (command, result) = futures_lite::future::poll_fn(|cx| {
                 use std::task::Poll;
-                if let Some(command) = self.commands.front_mut()
-                    && let Poll::Ready(result) = command.as_mut().poll(cx)
+                let Some(command) = self.commands.front_mut() else {
+                    return Poll::Pending;
+                };
+                if command.future.is_none() {
+                    let work = self.desktop.command(DesktopCommand::Key {
+                        key: command.key,
+                        phase: command.phase,
+                    });
+                    command.future = Some(Box::pin(futures_lite::future::or(work, async {
+                        async_io::Timer::after(Duration::from_secs(1)).await;
+                        Err(touchbar_desktop::DesktopError::Invalid(
+                            "key command timed out".into(),
+                        ))
+                    })));
+                }
+                if let Poll::Ready(result) = command
+                    .future
+                    .as_mut()
+                    .expect("started key")
+                    .as_mut()
+                    .poll(cx)
                 {
-                    self.commands.pop_front();
-                    return Poll::Ready(result);
+                    let command = self.commands.pop_front().expect("pending key");
+                    return Poll::Ready((command, result));
                 }
                 Poll::Pending
             })
-            .await
-            .map_or_else(
-                |e| Event::CommandError(format!("key command: {e}")),
-                |()| Event::Wake,
-            )
+            .await;
+            match result {
+                Ok(()) => Event::Wake,
+                Err(error) => {
+                    // The failed call may have delivered a key before losing its reply.
+                    // Remove stale pairs and make one bounded compensating release.
+                    self.commands.retain(|queued| queued.key != command.key);
+                    self.pressed_keys.remove(&command.key);
+                    if !command.recovery {
+                        self.commands.push_front(KeyCommand {
+                            key: command.key,
+                            phase: KeyPhase::Released,
+                            recovery: true,
+                            future: None,
+                        });
+                    }
+                    Event::CommandError(format!(
+                        "key command ({:?}, {:?}): {error}",
+                        command.key, command.phase
+                    ))
+                }
+            }
         })
         .await
     }
@@ -395,7 +478,11 @@ impl Session {
                 let repaint = self
                     .surfaces
                     .iter()
-                    .filter(|(_, s)| s.visual_dirty && !s.pacer.busy())
+                    .filter(|(_, s)| {
+                        s.visual_dirty
+                            && !s.pacer.busy()
+                            && s.gl_retry.is_none_or(|at| self.now() >= at)
+                    })
                     .filter_map(|(id, s)| Some((*id, s.generation?, s.scene.clone()?)))
                     .collect::<Vec<_>>();
                 for (surface, generation, scene) in repaint {
@@ -575,7 +662,9 @@ impl Session {
                     .surfaces
                     .iter()
                     .filter(|(_, s)| {
-                        s.pacer.deadline().is_some_and(|at| at <= now) && !s.pacer.busy()
+                        s.gl_retry.is_none()
+                            && s.pacer.deadline().is_some_and(|at| at <= now)
+                            && !s.pacer.busy()
                     })
                     .filter_map(|(id, s)| Some((*id, s.generation?, s.scene.clone()?)))
                     .collect::<Vec<_>>();
@@ -692,12 +781,25 @@ impl Session {
                 }
             }
             Output::DesktopKey { key, phase, .. } => {
-                ensure!(
-                    self.commands.len() < 1024,
-                    "too many pending desktop key commands"
-                );
-                self.commands
-                    .push_back(self.desktop.command(DesktopCommand::Key { key, phase }));
+                if phase == KeyPhase::Pressed {
+                    if self.pressed_keys.contains(&key) {
+                        return Ok(());
+                    }
+                    // Every accepted press reserves a slot for its matching release.
+                    if self.commands.len() + self.pressed_keys.len() + 2 > 1024 {
+                        self.warning("too many pending desktop key commands; press rejected");
+                        return Ok(());
+                    }
+                    self.pressed_keys.insert(key);
+                } else if !self.pressed_keys.remove(&key) {
+                    return Ok(());
+                }
+                self.commands.push_back(KeyCommand {
+                    key,
+                    phase,
+                    recovery: false,
+                    future: None,
+                });
             }
             Output::WatchKeys { surface, set } => {
                 if let Some(s) = self.surfaces.get_mut(&surface) {
@@ -755,6 +857,16 @@ impl Session {
         let Some(state) = self.surfaces.get_mut(&id) else {
             return Ok(false);
         };
+        if state.gl_retry.is_some_and(|at| now < at) {
+            state.generation = Some(generation);
+            state.scene = Some(scene);
+            state.visual_dirty = true;
+            self.enqueue(Work::Input(Input::FrameDone {
+                surface: id,
+                generation,
+            }))?;
+            return Ok(false);
+        }
         if !state.pacer.begin(now, animation) {
             if !animation {
                 state.queued = Some((generation, scene));
@@ -781,6 +893,7 @@ impl Session {
                 if let Some(state) = self.surfaces.get_mut(&id) {
                     state.animate = false;
                     state.scene = None;
+                    state.gl_retry = None;
                     state.pacer.stop_animation();
                 }
                 self.error(None, &format!("frame: {error:#}"));
@@ -837,25 +950,48 @@ impl Session {
         mut frame: Arc<PresentedFrame>,
         started: Instant,
     ) -> Result<()> {
+        let now = self.now();
         let Some(state) = self.surfaces.get_mut(&id) else {
             return Ok(());
         };
         if state.transport.needs_pixels() {
-            let gl = match &mut self.gl {
-                Some(gl) => gl,
-                None => {
-                    self.gl = Some(touchbar_gl::Renderer::new(self.options.gl.clone())?);
-                    self.gl.as_mut().expect("initialized GL")
+            let pixels = (|| {
+                if self.gl.is_none() {
+                    self.gl = Some((self.gl_factory)(self.options.gl.clone())?);
                 }
-            };
-            let pixels = gl.render(
-                id,
-                (state.info.width_px, state.info.height_px),
-                touchbar_gl::Orientation::Landscape,
-                &frame.display_list,
-                false,
-            )?;
-            Arc::make_mut(&mut frame).pixels = pixels;
+                self.gl.as_mut().expect("initialized GL").render(
+                    id,
+                    (state.info.width_px, state.info.height_px),
+                    &frame.display_list,
+                )
+            })();
+            match pixels {
+                Ok(pixels) => {
+                    Arc::make_mut(&mut frame).pixels = pixels;
+                    state.gl_failures = 0;
+                    state.gl_retry = None;
+                }
+                Err(error) => {
+                    self.gl = None;
+                    state.gl_failures += 1;
+                    let close = state.gl_failures >= 3;
+                    state.gl_retry = (!close).then(|| now.after(100u64 << (state.gl_failures - 1)));
+                    state.visual_dirty = !close;
+                    // Stop animation deadlines while waiting for context recovery.
+                    state.animate = false;
+                    state.pacer.stop_animation();
+                    let generation = frame.generation;
+                    self.error(None, &format!("GL surface {}: {error:#}", id.0));
+                    self.enqueue(Work::Input(Input::FrameDone {
+                        surface: id,
+                        generation,
+                    }))?;
+                    if close {
+                        self.enqueue(Work::Input(Input::SurfaceRemoved(id)))?;
+                    }
+                    return Ok(());
+                }
+            }
         }
         state.last = Some(frame.clone());
         let generation = frame.generation;
@@ -1179,5 +1315,227 @@ mod log_context_tests {
             .find(|line| line.contains("after-dispose"))
             .unwrap();
         assert!(after.contains("plugin=\"\""), "{after}");
+    }
+}
+
+#[cfg(test)]
+mod local_failure_tests {
+    use super::*;
+    use std::sync::Mutex;
+    fn session(desktop: Rc<dyn DesktopBackend>) -> (Session, ManualClock, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = ManualClock::default();
+        let (effects, _) = Engine::fake(desktop.clone());
+        let session = Session::new(
+            SessionOptions::new(dir.path().into(), UserConfig::default()),
+            clock.clone(),
+            Box::<touchbar_logic_runtime::MemoryStore>::default(),
+            desktop,
+            effects,
+        )
+        .unwrap();
+        (session, clock, dir)
+    }
+    fn info(id: u64) -> SurfaceInfo {
+        SurfaceInfo {
+            id: SurfaceId(id),
+            name: format!("headless:{id}").parse().unwrap(),
+            kind: SurfaceKind::Headless,
+            width_px: 400,
+            height_px: 60,
+            px_per_mm: 6.2,
+            caps: SurfaceCaps::default(),
+        }
+    }
+    struct Pixels(HeadlessSurface);
+    impl Surface for Pixels {
+        fn info(&self) -> SurfaceInfo {
+            self.0.info()
+        }
+        fn needs_pixels(&self) -> bool {
+            true
+        }
+        fn present(&mut self, frame: Arc<PresentedFrame>) -> Result<Presentation, String> {
+            self.0.present(frame)
+        }
+    }
+    #[test]
+    fn gl_initialization_failure_is_bounded_and_closes_only_affected_surface() {
+        let (mut session, clock, _dir) = session(Rc::new(touchbar_desktop::NullBackend::default()));
+        session.options.gl =
+            touchbar_gl::Backend::RenderNode("/definitely-missing-touchbar-render-node".into());
+        let (pixels, _) = HeadlessSurface::new(info(1));
+        let (other, handle) = HeadlessSurface::new(info(2));
+        session.add_surface(Box::new(Pixels(pixels))).unwrap();
+        session.add_surface(Box::new(other)).unwrap();
+        session.pump().expect("GL failure must remain local");
+        assert!(handle.frames() > 0);
+        assert!(session.surfaces.contains_key(&SurfaceId(1)));
+        for ms in [100, 300] {
+            clock.set(Timestamp(ms)).unwrap();
+            session.handle_event(Event::Wake).unwrap();
+            session.pump().unwrap();
+        }
+        assert!(!session.surfaces.contains_key(&SurfaceId(1)));
+        assert!(session.surfaces.contains_key(&SurfaceId(2)));
+        session.dump().replay().unwrap();
+    }
+    struct ScriptRenderer {
+        calls: Rc<std::cell::Cell<usize>>,
+    }
+    impl PixelRenderer for ScriptRenderer {
+        fn render(
+            &mut self,
+            _: SurfaceId,
+            (width, height): (u32, u32),
+            _: &touchbar_ui::DisplayList,
+        ) -> Result<Option<touchbar_gl::RenderedFrame>> {
+            let call = self.calls.get() + 1;
+            self.calls.set(call);
+            if call == 2 {
+                return Err(anyhow!("injected lost GL context"));
+            }
+            Ok(Some(touchbar_gl::RenderedFrame {
+                width,
+                height,
+                pixels: vec![0; (width * height * 4) as usize],
+                damage: vec![],
+            }))
+        }
+        fn remove_surface(&mut self, _: SurfaceId) {}
+    }
+    #[test]
+    fn failed_gl_frame_releases_generation_and_recreates_context_after_backoff() {
+        let (mut session, clock, _dir) = session(Rc::new(touchbar_desktop::NullBackend::default()));
+        let calls = Rc::new(std::cell::Cell::new(0));
+        let created = Rc::new(std::cell::Cell::new(0));
+        let (render_calls, contexts) = (calls.clone(), created.clone());
+        session.gl_factory = Box::new(move |_| {
+            contexts.set(contexts.get() + 1);
+            Ok(Box::new(ScriptRenderer {
+                calls: render_calls.clone(),
+            }))
+        });
+        let (pixels, handle) = HeadlessSurface::new(info(1));
+        session.add_surface(Box::new(Pixels(pixels))).unwrap();
+        session.pump().unwrap();
+        let mut resized = info(1);
+        resized.width_px = 500;
+        session
+            .handle_event(Event::Input(Input::SurfaceChanged(resized)))
+            .unwrap();
+        session.pump().expect("failed render remains local");
+        assert_eq!(handle.frames(), 1);
+        assert!(!session.surfaces[&SurfaceId(1)].pacer.busy());
+        assert_eq!(session.next_deadline(), Some(Timestamp(100)));
+        clock.advance(99);
+        session.handle_event(Event::Wake).unwrap();
+        session.pump().unwrap();
+        assert_eq!(calls.get(), 2);
+        clock.advance(1);
+        session.handle_event(Event::Wake).unwrap();
+        session.pump().unwrap();
+        assert_eq!(created.get(), 2);
+        assert_eq!(handle.frames(), 2);
+        assert_eq!(handle.frame().unwrap().pixels.as_ref().unwrap().width, 500);
+        assert_eq!(session.surfaces[&SurfaceId(1)].gl_failures, 0);
+        session.dump().replay().unwrap();
+    }
+    struct Keys {
+        log: Arc<Mutex<Vec<(SystemKey, KeyPhase)>>>,
+        stuck: bool,
+    }
+    impl DesktopBackend for Keys {
+        fn name(&self) -> &'static str {
+            "test-keys"
+        }
+        fn start(
+            &mut self,
+            _: async_channel::Sender<BackendEvent>,
+        ) -> Result<(), touchbar_desktop::DesktopError> {
+            Ok(())
+        }
+        fn command(&self, command: DesktopCommand) -> touchbar_desktop::CommandFuture {
+            let DesktopCommand::Key { key, phase } = command else {
+                panic!("unexpected command")
+            };
+            self.log.lock().unwrap().push((key, phase));
+            if self.stuck && phase == KeyPhase::Pressed {
+                Box::pin(std::future::pending())
+            } else {
+                Box::pin(std::future::ready(Ok(())))
+            }
+        }
+    }
+    fn key(session: &mut Session, phase: KeyPhase) {
+        session
+            .output(Output::DesktopKey {
+                surface: SurfaceId(1),
+                key: SystemKey::F1,
+                phase,
+            })
+            .expect("backpressure must remain local");
+    }
+    #[test]
+    fn full_key_queue_preserves_releases_and_does_not_dispatch_early() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (mut session, _, _dir) = session(Rc::new(Keys {
+            log: log.clone(),
+            stuck: false,
+        }));
+        for _ in 0..512 {
+            key(&mut session, KeyPhase::Pressed);
+            key(&mut session, KeyPhase::Released);
+        }
+        key(&mut session, KeyPhase::Pressed);
+        key(&mut session, KeyPhase::Released);
+        assert!(
+            log.lock().unwrap().is_empty(),
+            "commands must start serially on dispatch"
+        );
+        assert_eq!(session.commands.len(), 1024);
+        futures_lite::future::block_on(async {
+            for _ in 0..1024 {
+                let event = session.next_executor().await;
+                session.handle_event(event).unwrap();
+                session.pump().unwrap();
+            }
+        });
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 1024);
+        assert_eq!(log.last(), Some(&(SystemKey::F1, KeyPhase::Released)));
+    }
+    #[test]
+    fn timed_out_key_does_not_block_release_or_keep_stale_presses() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (mut session, _, _dir) = session(Rc::new(Keys {
+            log: log.clone(),
+            stuck: true,
+        }));
+        for _ in 0..3 {
+            key(&mut session, KeyPhase::Pressed);
+            key(&mut session, KeyPhase::Released);
+        }
+        futures_lite::future::block_on(async {
+            let event = futures_lite::future::or(session.next_executor(), async {
+                async_io::Timer::after(Duration::from_secs(3)).await;
+                panic!("stuck key never timed out")
+            })
+            .await;
+            assert!(matches!(event, Event::CommandError(_)));
+            session.handle_event(event).unwrap();
+            session.pump().unwrap();
+            let event = session.next_executor().await;
+            session.handle_event(event).unwrap();
+            session.pump().unwrap();
+        });
+        assert!(session.commands.is_empty());
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                (SystemKey::F1, KeyPhase::Pressed),
+                (SystemKey::F1, KeyPhase::Released)
+            ]
+        );
     }
 }
