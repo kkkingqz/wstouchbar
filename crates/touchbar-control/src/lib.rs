@@ -79,48 +79,81 @@ fn check_version(version: u32) -> io::Result<()> {
     }
     Ok(())
 }
-fn frame_length(prefix: [u8; 4]) -> io::Result<usize> {
+fn check_limit(limit: usize) -> io::Result<()> {
+    if limit == 0 || u32::try_from(limit).is_err() || limit.checked_add(4).is_none() {
+        return Err(invalid("control frame budget must be 1..u32::MAX"));
+    }
+    Ok(())
+}
+fn frame_length(prefix: [u8; 4], limit: usize) -> io::Result<usize> {
     let size = usize::try_from(u32::from_le_bytes(prefix)).map_err(|e| invalid(e.to_string()))?;
-    if size == 0 || size > MAX_FRAME {
-        return Err(invalid("control frame length must be 1..16 MiB"));
+    if size == 0 || size > limit {
+        return Err(invalid(format!(
+            "control frame length must be 1..{limit} bytes"
+        )));
     }
     Ok(size)
 }
-/// JSON serialization stops at the budget rather than allocating an oversized frame.
+/// JSON serialization stops at the session socket's budget.
 pub fn encode(value: &impl Serialize) -> io::Result<Vec<u8>> {
-    struct Bounded(Vec<u8>);
+    encode_with_limit(value, MAX_FRAME)
+}
+/// JSON serialization stops at the selected socket's budget, including JSON overhead.
+pub fn encode_with_limit(value: &impl Serialize, limit: usize) -> io::Result<Vec<u8>> {
+    check_limit(limit)?;
+    struct Bounded {
+        bytes: Vec<u8>,
+        limit: usize,
+    }
     impl Write for Bounded {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if self.0.len().saturating_add(bytes.len()) > MAX_FRAME + 4 {
-                return Err(invalid("control frame exceeds 16 MiB"));
+            if self.bytes.len().saturating_add(bytes.len()) > self.limit + 4 {
+                return Err(invalid("control frame exceeds socket budget"));
             }
-            self.0.extend_from_slice(bytes);
+            self.bytes.extend_from_slice(bytes);
             Ok(bytes.len())
         }
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
-    let mut output = Bounded(vec![0; 4]);
+    let mut output = Bounded {
+        bytes: vec![0; 4],
+        limit,
+    };
     serde_json::to_writer(&mut output, value).map_err(|e| invalid(e.to_string()))?;
-    let length = u32::try_from(output.0.len() - 4).map_err(|e| invalid(e.to_string()))?;
-    output.0[..4].copy_from_slice(&length.to_le_bytes());
-    Ok(output.0)
+    let length = u32::try_from(output.bytes.len() - 4).map_err(|e| invalid(e.to_string()))?;
+    output.bytes[..4].copy_from_slice(&length.to_le_bytes());
+    Ok(output.bytes)
 }
 pub fn read_frame<R: Read, T: DeserializeOwned>(reader: &mut R) -> io::Result<T> {
+    read_frame_with_limit(reader, MAX_FRAME)
+}
+pub fn read_frame_with_limit<R: Read, T: DeserializeOwned>(
+    reader: &mut R,
+    limit: usize,
+) -> io::Result<T> {
+    check_limit(limit)?;
     let mut prefix = [0; 4];
     reader.read_exact(&mut prefix)?;
-    let mut bytes = vec![0; frame_length(prefix)?];
+    let mut bytes = vec![0; frame_length(prefix, limit)?];
     reader.read_exact(&mut bytes)?;
     serde_json::from_slice(&bytes).map_err(|e| invalid(e.to_string()))
 }
 async fn read_async<T: DeserializeOwned>(
     stream: &mut async_io::Async<std::os::unix::net::UnixStream>,
 ) -> io::Result<T> {
+    read_async_with_limit(stream, MAX_FRAME).await
+}
+pub async fn read_async_with_limit<T: DeserializeOwned>(
+    stream: &mut async_io::Async<std::os::unix::net::UnixStream>,
+    limit: usize,
+) -> io::Result<T> {
     use futures_lite::io::AsyncReadExt;
+    check_limit(limit)?;
     let mut prefix = [0; 4];
     stream.read_exact(&mut prefix).await?;
-    let mut bytes = vec![0; frame_length(prefix)?];
+    let mut bytes = vec![0; frame_length(prefix, limit)?];
     stream.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(|e| invalid(e.to_string()))
 }

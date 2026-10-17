@@ -10,3 +10,24 @@ libfuzzer-sys = "0.4"
 touchbar-protocol = { path = "../crates/touchbar-protocol" }
 [workspace]
 members = ["."]
+
+[[bin]]
+name = "session_message"
+path = "fuzz_targets/session_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "daemon_message"
+path = "fuzz_targets/daemon_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "swapchain"
+path = "fuzz_targets/swapchain.rs"
+test = false
+doc = false
+bench = false

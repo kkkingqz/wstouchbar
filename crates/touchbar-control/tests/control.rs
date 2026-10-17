@@ -218,3 +218,37 @@ fn accept_resource_exhaustion_backs_off_and_recovers_without_losing_server() {
     .expect("control request after recovery");
     assert_eq!(incoming.request.command, Command::Status);
 }
+
+#[test]
+fn codec_applies_each_socket_budget_before_reading_or_serializing_payload() {
+    let payload = "x".repeat(65_535);
+    assert!(encode(&payload).is_ok());
+    assert!(encode_with_limit(&payload, 65_536).is_err()); // JSON quotes count.
+    let mut short = Cursor::new(65_537u32.to_le_bytes());
+    let error = read_frame_with_limit::<_, String>(&mut short, 65_536).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    let data = encode_with_limit(&"ok", 4).unwrap();
+    assert_eq!(
+        read_frame_with_limit::<_, String>(&mut Cursor::new(data), 4).unwrap(),
+        "ok"
+    );
+    assert!(encode_with_limit(&"", 0).is_err());
+    assert!(read_frame_with_limit::<_, String>(&mut Cursor::new([0; 4]), 0).is_err());
+}
+#[test]
+fn asynchronous_codec_checks_socket_budget_before_waiting_for_body() {
+    futures_lite::future::block_on(async {
+        let (mut writer, reader) = std::os::unix::net::UnixStream::pair().unwrap();
+        writer.write_all(&65_537u32.to_le_bytes()).unwrap();
+        let mut reader = async_io::Async::new(reader).unwrap();
+        let result = futures_lite::future::or(
+            async { read_async_with_limit::<String>(&mut reader, 65_536).await },
+            async {
+                async_io::Timer::after(Duration::from_secs(1)).await;
+                panic!("waited for oversized body")
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    });
+}

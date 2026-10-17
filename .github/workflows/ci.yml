@@ -82,10 +82,10 @@ jobs:
         working-directory: fuzz
         run: |
           targets=$(cargo +nightly fuzz list)
-          if [ -z "$targets" ]; then
-            echo "Decoder targets are introduced in stage 4 H2; none exist yet."
-          fi
+          test -n "$targets"
           for target in $targets; do
+            mkdir -p "corpus/$target"
+            cp "seeds/$target/"* "corpus/$target/"
             cargo +nightly fuzz run "$target" -- -max_total_time=600
           done
       - name: Upload fuzz crashes

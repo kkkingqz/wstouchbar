@@ -2748,6 +2748,14 @@ dependencies = [
 [[package]]
 name = "touchbar-protocol"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rustix",
+ "serde",
+ "serde_json",
+ "touchbar-control",
+ "touchbar-model",
+]
 
 [[package]]
 name = "touchbar-scene"
