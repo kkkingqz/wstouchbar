@@ -2,6 +2,7 @@ use crate::LoadRequest;
 use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ffi::OsString,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::Duration,
@@ -10,6 +11,12 @@ struct WatchRecord {
     descriptor: WatchDescriptor,
     device: u64,
     inode: u64,
+    interest: Interest,
+}
+#[derive(Default)]
+struct Interest {
+    tree: bool,
+    names: BTreeSet<OsString>,
 }
 const DEBOUNCE: Duration = Duration::from_millis(200);
 const RETRY: Duration = Duration::from_secs(1);
@@ -60,7 +67,16 @@ impl ReloadWatcher {
                         count += 1;
                         if event.mask.contains(EventMask::IGNORED) {
                             self.watches.retain(|_, wd| wd.descriptor != event.wd);
-                        } else {
+                        } else if event.mask.contains(EventMask::Q_OVERFLOW)
+                            || self.watches.values().any(|watch| {
+                                watch.descriptor == event.wd
+                                    && (watch.interest.tree
+                                        || event.name.is_none()
+                                        || event.name.is_some_and(|name| {
+                                            watch.interest.names.contains(name)
+                                        }))
+                            })
+                        {
                             changed = true;
                         }
                     }
@@ -89,13 +105,14 @@ impl ReloadWatcher {
         }
         Ok(false)
     }
-    fn add(&mut self, path: &Path) -> Result<(), String> {
+    fn add(&mut self, path: &Path, interest: Interest) -> Result<(), String> {
         let metadata = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
         if self
             .watches
             .get(path)
             .is_some_and(|wd| wd.device == metadata.dev() && wd.inode == metadata.ino())
         {
+            self.watches.get_mut(path).unwrap().interest = interest;
             return Ok(());
         }
         if let Some(old) = self.watches.remove(path) {
@@ -125,17 +142,30 @@ impl ReloadWatcher {
                 descriptor: wd,
                 device: metadata.dev(),
                 inode: metadata.ino(),
+                interest,
             },
         );
         Ok(())
     }
     fn refresh(&mut self) -> bool {
-        let mut wanted = BTreeSet::new();
+        let mut wanted: BTreeMap<PathBuf, Interest> = BTreeMap::new();
         let mut complete = true;
-        for file in [&self.request.config_file, &self.request.bindings_file] {
-            match existing_ancestor(file.parent().unwrap_or(Path::new("."))) {
-                Ok(path) => {
-                    wanted.insert(path);
+        for target in [&self.request.config_file, &self.request.bindings_file]
+            .into_iter()
+            .chain(&self.request.paths)
+        {
+            match parent_watch(target) {
+                Ok((path, name))
+                    if wanted.contains_key(&path) || wanted.len() < MAX_DIRECTORIES =>
+                {
+                    wanted.entry(path).or_default().names.insert(name);
+                }
+                Ok(_) => {
+                    issue(
+                        &mut self.issues,
+                        "plugin watcher exceeds 4096 directories".into(),
+                    );
+                    complete = false;
                 }
                 Err(error) => {
                     issue(&mut self.issues, error);
@@ -145,25 +175,6 @@ impl ReloadWatcher {
         }
         let mut visited = BTreeSet::new();
         for root in &self.request.paths {
-            // A parent remains useful if the root is replaced or loses access.
-            for candidate in [root.as_path(), root.parent().unwrap_or(Path::new("."))] {
-                match existing_ancestor(candidate) {
-                    Ok(path) if wanted.contains(&path) || wanted.len() < MAX_DIRECTORIES => {
-                        wanted.insert(path);
-                    }
-                    Ok(_) => {
-                        issue(
-                            &mut self.issues,
-                            "plugin watcher exceeds 4096 directories".into(),
-                        );
-                        complete = false;
-                    }
-                    Err(error) => {
-                        issue(&mut self.issues, error);
-                        complete = false;
-                    }
-                }
-            }
             let mut stack = if root.is_dir() {
                 vec![root.clone()]
             } else {
@@ -181,7 +192,7 @@ impl ReloadWatcher {
                 if !visited.insert(canonical.clone()) {
                     continue;
                 }
-                if !wanted.contains(&canonical) && wanted.len() >= MAX_DIRECTORIES {
+                if !wanted.contains_key(&canonical) && wanted.len() >= MAX_DIRECTORIES {
                     issue(
                         &mut self.issues,
                         "plugin watcher exceeds 4096 directories".into(),
@@ -189,7 +200,7 @@ impl ReloadWatcher {
                     complete = false;
                     break;
                 }
-                wanted.insert(canonical.clone());
+                wanted.entry(canonical.clone()).or_default().tree = true;
                 let entries = match std::fs::read_dir(&canonical) {
                     Ok(entries) => entries,
                     Err(e) => {
@@ -225,7 +236,7 @@ impl ReloadWatcher {
             let stale: Vec<_> = self
                 .watches
                 .keys()
-                .filter(|p| !wanted.contains(*p))
+                .filter(|p| !wanted.contains_key(*p))
                 .cloned()
                 .collect();
             for path in stale {
@@ -234,8 +245,8 @@ impl ReloadWatcher {
                 }
             }
         }
-        for path in wanted {
-            if let Err(error) = self.add(&path) {
+        for (path, interest) in wanted {
+            if let Err(error) = self.add(&path, interest) {
                 issue(&mut self.issues, error);
                 complete = false;
             }
@@ -243,19 +254,30 @@ impl ReloadWatcher {
         complete
     }
 }
-fn existing_ancestor(path: &Path) -> Result<PathBuf, String> {
-    let mut path = if path.as_os_str().is_empty() {
-        Path::new(".")
-    } else {
-        path
-    };
-    while !path.is_dir() {
-        path = path
+// Keep the lexical child name while climbing; canonicalization is only for
+// the directory actually watched (including symlinked plugin roots).
+fn parent_watch(target: &Path) -> Result<(PathBuf, OsString), String> {
+    let mut child = target;
+    loop {
+        let parent = child
             .parent()
-            .ok_or_else(|| format!("no existing parent: {}", path.display()))?;
+            .ok_or_else(|| format!("no existing parent: {}", target.display()))?;
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        if parent.is_dir() {
+            return Ok((
+                parent.canonicalize().map_err(|e| e.to_string())?,
+                child
+                    .file_name()
+                    .ok_or_else(|| format!("no child name: {}", child.display()))?
+                    .to_owned(),
+            ));
+        }
+        child = parent;
     }
-    path.canonicalize()
-        .map_err(|e| format!("{}: {e}", path.display()))
 }
 fn issue(issues: &mut Vec<String>, message: String) {
     if issues.len() < 32 && !issues.contains(&message) {

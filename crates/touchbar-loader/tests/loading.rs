@@ -459,3 +459,34 @@ fn broken_config_at_start_keeps_startup_config_and_healthy_plugins() {
     assert_eq!(loader.current().unwrap().config, UserConfig::default());
     assert_eq!(loader.current().unwrap().catalog.plugins.len(), 1);
 }
+
+#[test]
+fn watcher_ignores_unrelated_ancestor_writes_and_follows_missing_paths() {
+    let t = Temp::new();
+    let req = LoadRequest {
+        paths: vec![t.0.join("share/touchbar/plugins")],
+        config_file: t.0.join("config/touchbar/config.toml"),
+        bindings_file: t.0.join("config/touchbar/bindings.toml"),
+    };
+    fs::create_dir_all(t.0.join("config")).unwrap();
+    fs::create_dir_all(t.0.join("share")).unwrap();
+    let mut watcher = ReloadWatcher::new(&req).unwrap();
+    fs::write(t.0.join("config/recently-used.xbel"), "unrelated").unwrap();
+    fs::write(t.0.join("share/other-package"), "unrelated").unwrap();
+    assert!(!watcher.poll(Duration::ZERO).unwrap());
+    assert!(!watcher.poll(Duration::from_millis(250)).unwrap());
+    assert_eq!(watcher.deadline(), None);
+    fs::create_dir_all(req.paths[0].clone()).unwrap();
+    fs::create_dir_all(req.config_file.parent().unwrap()).unwrap();
+    assert!(!watcher.poll(Duration::from_millis(300)).unwrap());
+    assert!(watcher.poll(Duration::from_millis(550)).unwrap());
+    fs::write(&req.config_file, "config").unwrap();
+    assert!(!watcher.poll(Duration::from_millis(600)).unwrap());
+    assert!(watcher.poll(Duration::from_millis(850)).unwrap());
+    fs::write(req.paths[0].join("plugin.toml"), "plugin").unwrap();
+    assert!(!watcher.poll(Duration::from_millis(900)).unwrap());
+    assert!(watcher.poll(Duration::from_millis(1150)).unwrap());
+    fs::write(t.0.join("config/other"), "still unrelated").unwrap();
+    assert!(!watcher.poll(Duration::from_millis(1200)).unwrap());
+    assert!(!watcher.poll(Duration::from_millis(1450)).unwrap());
+}
