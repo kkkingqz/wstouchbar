@@ -16,6 +16,7 @@ cast_sign_loss = "warn"
 match_same_arms = "warn"
 
 [dependencies]
+touchbar-protocol.workspace = true
 serde.workspace = true
 touchbar-bindings.workspace = true
 touchbar-model.workspace = true
@@ -23,4 +24,5 @@ touchbar-sets.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile = "3"

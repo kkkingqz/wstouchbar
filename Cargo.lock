@@ -2894,10 +2894,12 @@ dependencies = [
 name = "touchbard"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "tempfile",
  "touchbar-bindings",
  "touchbar-model",
+ "touchbar-protocol",
  "touchbar-sets",
  "tracing-subscriber",
 ]
