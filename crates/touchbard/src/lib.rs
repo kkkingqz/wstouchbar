@@ -15,3 +15,5 @@ pub mod drm;
 pub mod probe;
 
 pub mod input;
+
+pub mod keys;

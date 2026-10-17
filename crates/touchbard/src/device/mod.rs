@@ -34,14 +34,7 @@ impl Device {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    /// Pins and checks the USB directory before opening the attribute relative to it.
-    pub fn write_config(&self, value: u8) -> io::Result<()> {
-        if value > 2 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "unsupported USB configuration",
-            ));
-        }
+    pub(crate) fn open_directory(&self) -> io::Result<rustix::fd::OwnedFd> {
         let fd = open(
             &self.path,
             OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
@@ -54,6 +47,17 @@ impl Device {
                 "USB device was replaced",
             ));
         }
+        Ok(fd)
+    }
+    /// Pins and checks the USB directory before opening the attribute relative to it.
+    pub fn write_config(&self, value: u8) -> io::Result<()> {
+        if value > 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsupported USB configuration",
+            ));
+        }
+        let fd = self.open_directory()?;
         let attr = openat(
             &fd,
             "bConfigurationValue",

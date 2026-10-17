@@ -258,3 +258,8 @@ impl FsMonitor {
         }
     }
 }
+impl std::os::fd::AsFd for FsMonitor {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        std::os::fd::AsFd::as_fd(self.socket.get_ref())
+    }
+}
