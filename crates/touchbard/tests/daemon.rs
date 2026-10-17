@@ -293,19 +293,13 @@ fn sleep_releases_inhibitor_on_safe_native_without_waiting_for_driver_and_after_
 fn frame_accounting_limits_inflight_and_ignores_stale_presentations() {
     let mut d = displaying();
     let generation = d.mode().generation();
-    for (index, frame) in [(0, 1), (1, 2)] {
-        assert!(
-            d.handle(
-                Timestamp(2100),
-                Event::Message {
-                    connection: 1,
-                    message: SessionMessage::FrameReady { index, frame }
-                }
-            )
-            .iter()
-            .any(|c| matches!(c, Command::Present { .. }))
-        );
-    }
+    d.handle(
+        Timestamp(2100),
+        Event::Message {
+            connection: 1,
+            message: SessionMessage::FrameReady { index: 0, frame: 1 },
+        },
+    );
     d.handle(
         Timestamp(2101),
         Event::FramePresented {
@@ -337,7 +331,7 @@ fn frame_accounting_limits_inflight_and_ignores_stale_presentations() {
         Timestamp(2103),
         Event::Message {
             connection: 1,
-            message: SessionMessage::FrameReady { index: 0, frame: 3 },
+            message: SessionMessage::FrameReady { index: 1, frame: 2 },
         },
     );
     d.handle(
@@ -969,4 +963,76 @@ fn shutdown_before_device_scan_waits_for_discovery_or_its_safety_budget() {
         };
         assert!(commands.contains(&Command::Exit));
     }
+}
+#[test]
+fn displayed_buffer_is_busy_but_does_not_consume_pending_quota_in_two_buffer_swapchain() {
+    let mut d = owned();
+    drain(&mut d, 1, 0);
+    d.advance(Timestamp(2000));
+    let generation = d.mode().generation();
+    let mut display = info();
+    display.header.buffer_count = 2;
+    d.handle(
+        Timestamp(2001),
+        Event::DisplayReady {
+            generation,
+            info: display,
+        },
+    );
+    drain(&mut d, 1, 2001);
+    d.handle(
+        Timestamp(2100),
+        Event::Message {
+            connection: 1,
+            message: SessionMessage::FrameReady { index: 0, frame: 1 },
+        },
+    );
+    d.handle(
+        Timestamp(2101),
+        Event::FramePresented {
+            generation,
+            connection: 1,
+            index: 0,
+            frame: 1,
+            commit_us: 10,
+        },
+    );
+    drain(&mut d, 1, 2101);
+    let commands = d.handle(
+        Timestamp(2102),
+        Event::Message {
+            connection: 1,
+            message: SessionMessage::FrameReady { index: 1, frame: 2 },
+        },
+    );
+    assert!(commands.iter().any(|c| matches!(
+        c,
+        Command::Present {
+            index: 1,
+            frame: 2,
+            ..
+        }
+    )));
+    assert_eq!(d.owner(), Some(1));
+    assert_eq!(d.check_invariants(), Ok(()));
+}
+
+#[test]
+fn only_one_unconfirmed_frame_even_with_three_buffers() {
+    let mut d = displaying();
+    d.handle(
+        Timestamp(2100),
+        Event::Message {
+            connection: 1,
+            message: SessionMessage::FrameReady { index: 0, frame: 1 },
+        },
+    );
+    d.handle(
+        Timestamp(2101),
+        Event::Message {
+            connection: 1,
+            message: SessionMessage::FrameReady { index: 1, frame: 2 },
+        },
+    );
+    assert_eq!(d.owner(), None);
 }

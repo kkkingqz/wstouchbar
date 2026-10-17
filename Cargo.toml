@@ -27,6 +27,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/kkkingqz/wstouchbar"
 
 [workspace.dependencies]
+drm = "0.14"
+drm-ffi = "0.9"
 anyhow = "1.0"
 touchbar-protocol = { path = "crates/touchbar-protocol" }
 touchbard = { path = "crates/touchbard" }
@@ -74,9 +76,10 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 pipewire = { version = "0.10.1", features = ["v0_3_65"] }
 zbus = "5.19.0"
-rustix = { version = "1.1", features = ["process", "fs", "net", "event"] }
+rustix = { version = "1.1", features = ["process", "fs", "net", "event", "time"] }
 async-io = "2.6"
 futures-lite = "2.6"
+async-signal = "0.2"
 async-channel = "2.5"
 inotify = "0.11.5"
 tracing = "0.1"

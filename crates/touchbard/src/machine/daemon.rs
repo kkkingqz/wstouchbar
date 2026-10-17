@@ -831,8 +831,7 @@ impl Daemon {
                     || !c.input_enabled
                     || !matches!(self.mode.state(), mode::State::Display { .. })
                     || c.info.is_none_or(|i| {
-                        index >= u32::from(i.header.buffer_count)
-                            || c.frames.len() >= usize::from(i.header.buffer_count) - 1
+                        index >= u32::from(i.header.buffer_count) || !c.pending_frames.is_empty()
                     })
                     || c.frames.contains_key(&index)
                     || c.last_frame.is_some_and(|last| frame <= last)
@@ -964,10 +963,10 @@ impl Daemon {
             {
                 return Err("T9: wake contact delivered");
             }
-            if client
-                .info
-                .is_some_and(|i| client.frames.len() >= usize::from(i.header.buffer_count))
-            {
+            if client.info.is_some_and(|i| {
+                client.frames.len() > usize::from(i.header.buffer_count)
+                    || client.pending_frames.len() > 1
+            }) {
                 return Err("too many in-flight buffers");
             }
         }

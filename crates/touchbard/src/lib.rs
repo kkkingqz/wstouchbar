@@ -7,3 +7,9 @@ pub mod machine;
 pub use machine::{Command, Daemon, DisplayInfo, Event, Outgoing, Session};
 
 pub mod device;
+
+pub mod worker;
+
+pub mod drm;
+
+pub mod probe;
