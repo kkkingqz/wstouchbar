@@ -275,6 +275,8 @@ pub async fn run() -> io::Result<Report> {
             "touchbard probe requires root",
         ));
     }
+    // Fail before creating runtime state, stopping any device, or USB rollback writes.
+    crate::device::isolation::require_installed()?;
     let mut signals = Signals::new([Signal::Int, Signal::Term, Signal::Hup])?;
     let roots = Roots::default();
     let exclusive = ExclusiveDevice::acquire(&roots)?;

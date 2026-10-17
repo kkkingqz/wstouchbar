@@ -287,6 +287,7 @@ impl<F: FnMut() -> io::Result<()>> Operations for SystemOps<F> {
                 "unsupported module",
             ));
         }
+        isolation::reload()?;
         let status = std::process::Command::new("modprobe")
             .arg(name)
             .env_clear()
@@ -310,3 +311,5 @@ mod events;
 pub use events::*;
 mod exclusive;
 pub use exclusive::*;
+
+pub mod isolation;

@@ -1,0 +1,4 @@
+# Required before entering USB display mode, including standalone touchbard probe.
+# touchbard owns these devices directly; desktop compositors must not open them.
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", DRIVERS=="appletbdrm", ENV{ID_SEAT}="seat-touchbar", TAG-="master-of-seat", TAG+="mutter-device-ignore"
+SUBSYSTEM=="input", KERNEL=="event[0-9]*", ATTRS{name}=="Apple Inc. Touch Bar Display Touchpad", ENV{ID_SEAT}="seat-touchbar", ENV{LIBINPUT_IGNORE_DEVICE}="1"

@@ -303,6 +303,14 @@ docs/hardware-checklist.md
 
 ### H6. DRM-вывод, swapchain и touchbard probe
 
+**Обязательное предусловие (уточнение после инцидента 2026-10-17):** изоляция DRM
+и дигитайзера из H16 устанавливается **до первого probe**, а не в конце этапа.
+Используется `packaging/udev/99-wstouchbar-isolation.rules`: отдельный seat,
+`mutter-device-ignore` и исключение дигитайзера из libinput. Без доверенного
+правила probe отказывает до USB-записей; рабочий поток перечитывает правила
+перед переключением display. H16 устанавливает этот же файл. Приёмка probe
+включает отсутствие ошибок/падения композитора, а не только выход теста 0.
+
 Перенос `select_touchbar`, `atomic_modeset`, `atomic_flip_damaged` и выделения буферов `ServiceHardware` из `touchbard/src/main.rs`.
 
 - **Карта:** DRM master, universal planes, atomic. Выбор коннектора, CRTC и плоскости, как в `select_touchbar`, для `appletbdrm` (USB-коннектор).
@@ -513,6 +521,7 @@ docs/hardware-checklist.md
 
   Минимальный набор capabilities определяется и проверяется на стенде.
 - **`touchbar-session.service`** (пользовательский): `graphical-session.target`, `Restart=on-failure` с backoff, `KillMode=control-group` (предложение 11).
+- **`99-wstouchbar-isolation.rules`:** обязательная изоляция, перенесённая в предусловие H6; при установке используется тот же файл.
 - **`90-touchbar.rules`:**
   - при появлении `05ac:8302` — конфигурация 1 и запуск `touchbard.service`;
   - карта `appletbdrm` и дигитайзер — вне seat0 (`ID_SEAT=seat-touchbar`, без `master-of-seat`). Иначе GNOME возьмёт карту как монитор, а дигитайзер — как сенсорный экран.
