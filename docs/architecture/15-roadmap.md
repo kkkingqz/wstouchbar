@@ -8,9 +8,9 @@
 | **1. Ядро** | `touchbar-core`, `touchbar-bindings`, `touchbar-testkit`, property-тесты инвариантов, сценарии из найденных багов | инварианты I1–I12 проходят на 10⁵ случайных последовательностей |
 | **2. Логика** | `wit/logic.wit`, `touchbar-logic-types`, `-runtime`, `-sdk`, формат наборов и манифеста (`touchbar-sets`, D66), перенос плагина `controls` | `controls` проходит тесты логики в testkit |
 | **3. Сессия** | дерево UI из наборов (`touchbar-sets`), перенос `touchbar-ui` и `touchbar-layout`, исполнитель действий, `touchbar-audio`, поверхность `headless` и симулятор, `touchbarctl render/status` | `controls` работает в симуляторе, эталонные PNG |
-| **4. touchbard** | протокол v2, рефакторинг `touchbard`: режимы, владение по logind, recovery, сон, мост Fn, затемнение | на железе: чек-лист пунктов 1, 3–7 ([13-testing.md](13-testing.md)) |
+| **4. touchbard** | протокол v2, рефакторинг `touchbard`: режимы, владение по logind, recovery, сон, мост Fn, затемнение; поверхность `touchbar` в сессии; юниты, правила udev и `xtask install` (D116) | на железе: чек-лист пунктов 1, 3–8 и пункт 2 без медиа ([13-testing.md](13-testing.md), D117) |
 | **5. Содержимое** | `touchbar-media`, `touchbar-open`, `touchbar-apps`, API рабочего стола, бэкенд GNOME и расширение, плагины `system`, `media`, `browser`, `profile-*` | весь список паритета v1 на железе |
-| **6. Выпуск** | `touchbarctl` полностью, `xtask install/deb`, PKGBUILD, CI, Releases, переход wsconfig на пакет с удалением `ws-touchbar-fn` | установка `.deb` на чистую систему и на рабочую машину через wsconfig |
+| **6. Выпуск** | `touchbarctl` полностью, `xtask deb`, PKGBUILD, CI, Releases, переход wsconfig на пакет с удалением `ws-touchbar-fn` | установка `.deb` на чистую систему и на рабочую машину через wsconfig |
 
 ## Результаты этапов
 
@@ -21,6 +21,8 @@
 Этап 2: [план](../plans/stage-2-logic.md), [приёмка](../validation/stage-2.md).
 
 Этап 3: [план](../plans/stage-3-session.md), [приёмка](../validation/stage-3.md), [исправления ревью](../plans/stage-3-review-fixes.md).
+
+Этап 4: [план](../plans/stage-4-touchbard.md).
 
 ## Паритет v1
 
