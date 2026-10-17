@@ -2531,6 +2531,7 @@ dependencies = [
  "async-channel",
  "async-io",
  "async-lock",
+ "event-listener",
  "futures-lite",
  "libc",
  "proptest",

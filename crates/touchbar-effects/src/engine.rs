@@ -57,9 +57,12 @@ struct Source {
     last: Option<SubscriptionData>,
 }
 impl Source {
-    fn update_owners(&self) {
+    fn update_owners(&self, pool: Option<&SpawnPool>) {
         let owners = self.ids.iter().map(|id| id.instance).collect();
         *lock(&self.owners) = owners;
+        if let Some(pool) = pool {
+            pool.notify_change();
+        }
         let owners = lock(&self.owners).clone();
         if let Some(process) = lock(&self.process).as_ref().and_then(Weak::upgrade) {
             process.set_owners(owners);
@@ -187,7 +190,8 @@ impl Engine {
                 }
                 if let Some(source) = self.sources.iter_mut().find(|s| s.kind == kind) {
                     source.ids.insert(subscription);
-                    source.update_owners();
+                    source
+                        .update_owners(self.resources.native.as_ref().map(|native| &native.spawn));
                     if let SubscriptionKind::DesktopFact { name } = &kind {
                         self.pending.push_back(Input::SubscriptionData {
                             subscription,
@@ -227,7 +231,7 @@ impl Engine {
             Output::Unsubscribe { subscription } => {
                 for s in &mut self.sources {
                     if s.ids.remove(&subscription) {
-                        s.update_owners();
+                        s.update_owners(self.resources.native.as_ref().map(|native| &native.spawn));
                     }
                 }
                 self.sources.retain(|s| !s.ids.is_empty());
@@ -409,11 +413,12 @@ async fn start_process(
     lines: bool,
 ) -> Result<Arc<Process>, EffectError> {
     loop {
+        let changed = pool.changed();
         let result = pool.start_shared(&lock(owners).clone(), spec.clone(), lines, None);
         match result {
             Ok(p) => return Ok(Arc::new(p)),
             Err(EffectError::Unavailable) => {
-                async_io::Timer::after(Duration::from_millis(5)).await;
+                changed.await;
             }
             Err(e) => return Err(e),
         }

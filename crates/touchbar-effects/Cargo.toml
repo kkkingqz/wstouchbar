@@ -13,6 +13,7 @@ touchbar-desktop.workspace = true
 touchbar-audio.workspace = true
 async-io.workspace = true
 async-lock = "3"
+event-listener = "5"
 async-channel.workspace = true
 futures-lite.workspace = true
 zbus.workspace = true

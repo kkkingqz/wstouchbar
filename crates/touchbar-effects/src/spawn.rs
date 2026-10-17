@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{Read, Write},
+    os::{fd::AsFd, unix::net::UnixStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, MutexGuard},
@@ -22,6 +23,7 @@ pub struct SpawnPool {
     per_instance: usize,
     session: usize,
     counts: Arc<Mutex<PoolState>>,
+    changed: Arc<event_listener::Event>,
 }
 #[derive(Default)]
 struct PoolState {
@@ -30,6 +32,7 @@ struct PoolState {
 }
 struct Lease {
     counts: Arc<Mutex<PoolState>>,
+    changed: Arc<event_listener::Event>,
     id: u64,
 }
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -37,7 +40,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 impl Lease {
     fn release(&self) {
-        lock(&self.counts).jobs.remove(&self.id);
+        if lock(&self.counts).jobs.remove(&self.id).is_some() {
+            self.changed.notify(usize::MAX);
+        }
     }
 }
 impl Drop for Lease {
@@ -50,6 +55,7 @@ struct Control {
     done: bool,
     reaped: bool,
     cancel: Option<EffectError>,
+    wake: UnixStream,
 }
 pub struct Process {
     pub events: async_channel::Receiver<ProcessEvent>,
@@ -63,6 +69,7 @@ impl Process {
             && let Some(job) = lock(&self.lease.counts).jobs.get_mut(&self.lease.id)
         {
             *job = owners;
+            self.lease.changed.notify(usize::MAX);
         }
     }
 
@@ -70,6 +77,7 @@ impl Process {
         let mut c = lock(&self.control);
         if !c.done && c.cancel.is_none() {
             c.cancel = Some(EffectError::Cancelled);
+            let _ = c.wake.write(&[1]);
             if !c.reaped {
                 native::signal_group(c.pid, libc::SIGTERM);
             }
@@ -88,7 +96,14 @@ impl SpawnPool {
             per_instance,
             session,
             counts: Arc::new(Mutex::new(PoolState::default())),
+            changed: Arc::new(event_listener::Event::new()),
         }
+    }
+    pub(crate) fn notify_change(&self) {
+        self.changed.notify(usize::MAX);
+    }
+    pub(crate) fn changed(&self) -> event_listener::EventListener {
+        self.changed.listen()
     }
     pub fn active(&self) -> usize {
         lock(&self.counts).jobs.len()
@@ -145,6 +160,7 @@ impl SpawnPool {
             state.jobs.insert(id, owners.clone());
             Arc::new(Lease {
                 counts: self.counts.clone(),
+                changed: self.changed.clone(),
                 id,
             })
         };
@@ -154,26 +170,34 @@ impl SpawnPool {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let (wake_read, wake_write) = UnixStream::pair().map_err(failed)?;
+        native::nonblocking(&wake_write).map_err(failed)?;
+        let wake_read = async_io::Async::new(wake_read).map_err(failed)?;
         let status = native::configure(&mut command).map_err(failed)?;
         let mut child = command.spawn().map_err(failed)?;
         let pid = child.id();
         let setup = (|| {
+            let pidfd = native::pidfd(pid)?;
             native::nonblocking(&status)?;
             native::nonblocking(child.stdin.as_ref().expect("stdin"))?;
             native::nonblocking(child.stdout.as_ref().expect("stdout"))?;
             native::nonblocking(child.stderr.as_ref().expect("stderr"))?;
-            Ok::<_, std::io::Error>(())
+            Ok::<_, std::io::Error>(pidfd)
         })();
-        if let Err(e) = setup {
-            native::signal_group(pid, libc::SIGKILL);
-            let _ = child.wait();
-            return Err(failed(e));
-        }
+        let pidfd = match setup {
+            Ok(fd) => fd,
+            Err(e) => {
+                native::signal_group(pid, libc::SIGKILL);
+                let _ = child.wait();
+                return Err(failed(e));
+            }
+        };
         let control = Arc::new(Mutex::new(Control {
             pid,
             done: false,
             reaped: false,
             cancel: None,
+            wake: wake_write,
         }));
         let worker_control = control.clone();
         let (events, receiver) = async_channel::bounded(64);
@@ -192,6 +216,8 @@ impl SpawnPool {
                     worker_control,
                     events,
                     worker_lease,
+                    wake_read,
+                    pidfd,
                 )
             });
         if let Err(e) = worker {
@@ -221,7 +247,8 @@ pub fn helper_main() -> Result<(), String> {
         .ok_or("missing parent pid")?
         .parse::<u32>()
         .map_err(|e| e.to_string())?;
-    let mut status = native::helper_setup(parent).map_err(|e| e.to_string())?;
+    let (mut status, mut wake) = native::helper_setup(parent).map_err(|e| e.to_string())?;
+    let mut terminating = None;
     let outcome = (|| {
         let mut payload = vec![];
         std::io::stdin()
@@ -244,6 +271,9 @@ pub fn helper_main() -> Result<(), String> {
             })
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
+        if native::parent_dead() || native::terminating() {
+            return Err("supervisor cancelled before launch".into());
+        }
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         if let Some(input) = spec.stdin {
             let mut pipe = child.stdin.take().expect("stdin");
@@ -251,21 +281,43 @@ pub fn helper_main() -> Result<(), String> {
                 let _ = pipe.write_all(input.as_bytes());
             });
         }
-        let mut terminating = None;
         loop {
-            if native::terminating() && terminating.is_none() {
-                terminating = Some(Instant::now());
-            }
-            if terminating.is_some_and(|t| t.elapsed() >= Duration::from_secs(1)) {
-                native::signal_group(std::process::id(), libc::SIGKILL);
+            wake.drain();
+            if native::parent_dead() || native::terminating() {
+                let at = *terminating.get_or_insert_with(Instant::now);
+                native::signal_children(
+                    if native::parent_dead() || at.elapsed() >= Duration::from_secs(1) {
+                        libc::SIGKILL
+                    } else {
+                        libc::SIGTERM
+                    },
+                )
+                .map_err(|e| e.to_string())?;
             }
             if let Some(exit) = child.try_wait().map_err(|e| e.to_string())? {
                 use std::os::unix::process::ExitStatusExt;
                 break Ok(exit.code().unwrap_or_else(|| -exit.signal().unwrap_or(1)));
             }
-            std::thread::sleep(Duration::from_millis(5));
+            let deadline = terminating
+                .map(|at| at + Duration::from_secs(1))
+                .filter(|at| *at > Instant::now());
+            wake.wait(deadline).map_err(|e| e.to_string())?;
         }
     })();
+    // Remain alive as subreaper until all adopted descendants are collected.
+    // A process that calls setsid is still our child after its parent exits.
+    let end = terminating.unwrap_or_else(Instant::now) + Duration::from_secs(1);
+    loop {
+        wake.drain();
+        if !native::reap_descendants().map_err(|e| e.to_string())? {
+            break;
+        }
+        let kill = native::parent_dead() || Instant::now() >= end;
+        native::signal_children(if kill { libc::SIGKILL } else { libc::SIGTERM })
+            .map_err(|e| e.to_string())?;
+        wake.wait((!kill).then_some(end))
+            .map_err(|e| e.to_string())?;
+    }
     let result = match outcome {
         Ok(code) => HelperResult {
             status: Some(code),
@@ -278,28 +330,18 @@ pub fn helper_main() -> Result<(), String> {
     };
     serde_json::to_writer(&mut status, &result).map_err(|e| e.to_string())?;
     drop(status);
-    // If the target forked children, supervise and reap them instead of letting them escape the session.
-    if native::reap_descendants().map_err(|e| e.to_string())? {
-        native::signal_group(std::process::id(), libc::SIGTERM);
-        let end = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < end {
-            if !native::reap_descendants().map_err(|e| e.to_string())? {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        native::signal_group(std::process::id(), libc::SIGKILL);
-    }
     Ok(())
 }
+trait Pipe: Read + AsFd + Send {}
+impl<T: Read + AsFd + Send> Pipe for T {}
 struct Reader {
-    file: Box<dyn Read + Send>,
+    file: Box<dyn Pipe>,
     bytes: Vec<u8>,
     eof: bool,
     truncated: bool,
 }
 impl Reader {
-    fn new(file: impl Read + Send + 'static) -> Self {
+    fn new(file: impl Pipe + 'static) -> Self {
         Self {
             file: Box::new(file),
             bytes: vec![],
@@ -332,22 +374,33 @@ impl Reader {
 }
 fn send(
     events: &async_channel::Sender<ProcessEvent>,
-    mut event: ProcessEvent,
+    event: ProcessEvent,
     control: &Mutex<Control>,
+    wake: &async_io::Async<UnixStream>,
+    deadline: Option<Instant>,
 ) -> bool {
-    loop {
-        match events.try_send(event) {
-            Ok(()) => return true,
-            Err(async_channel::TrySendError::Closed(_)) => return false,
-            Err(async_channel::TrySendError::Full(e)) => {
-                event = e;
-                if lock(control).cancel.is_some() {
-                    return false;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
+    if lock(control).cancel.is_some() {
+        return false;
     }
+    futures_lite::future::block_on(futures_lite::future::or(
+        async { events.send(event).await.is_ok() },
+        async {
+            futures_lite::future::or(
+                async {
+                    let _ = wake.readable().await;
+                },
+                async {
+                    if let Some(at) = deadline {
+                        async_io::Timer::at(at).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                },
+            )
+            .await;
+            false
+        },
+    ))
 }
 fn text(bytes: Vec<u8>, limit: usize) -> (String, bool) {
     let mut text = String::from_utf8_lossy(&bytes).into_owned();
@@ -372,8 +425,13 @@ fn run(
     control: Arc<Mutex<Control>>,
     events: async_channel::Sender<ProcessEvent>,
     lease: Arc<Lease>,
+    wake: async_io::Async<UnixStream>,
+    pidfd: File,
 ) {
     let start = Instant::now();
+    let deadline = timeout.map(|ms| start + Duration::from_millis(ms));
+    let mut drain_deadline = None;
+    let mut killed = false;
     let mut input = child.stdin.take();
     let mut offset = 0;
     let mut stdout = Reader::new(child.stdout.take().expect("stdout"));
@@ -384,6 +442,9 @@ fn run(
     let mut line = vec![];
     let mut failure = None;
     loop {
+        let mut bytes = [0; 64];
+        let mut wake_pipe = wake.get_ref();
+        while wake_pipe.read(&mut bytes).is_ok_and(|n| n > 0) {}
         {
             let mut c = lock(&control);
             if !c.done
@@ -398,8 +459,12 @@ fn run(
             if c.cancel.is_some() && termination.is_none() {
                 termination = Some(Instant::now());
             }
-            if !c.reaped && termination.is_some_and(|t| t.elapsed() >= Duration::from_secs(1)) {
+            if !c.reaped
+                && !killed
+                && termination.is_some_and(|t| t.elapsed() >= Duration::from_secs(2))
+            {
                 native::signal_group(c.pid, libc::SIGKILL);
+                killed = true;
             }
             if !c.reaped {
                 match native::exited_without_reaping(c.pid) {
@@ -409,6 +474,7 @@ fn run(
                         match child.wait() {
                             Ok(_) => {
                                 exited = true;
+                                drain_deadline = Some(Instant::now() + Duration::from_secs(1));
                                 c.reaped = true;
                             }
                             Err(e) => failure = Some(failed(e)),
@@ -459,8 +525,18 @@ fn run(
                         line.pop();
                     }
                     let (value, overflow) = text(std::mem::take(&mut line), limit);
-                    if overflow || !send(&events, ProcessEvent::Line(value), &control) {
-                        if lock(&control).cancel.is_none() {
+                    if overflow
+                        || !send(
+                            &events,
+                            ProcessEvent::Line(value),
+                            &control,
+                            &wake,
+                            deadline,
+                        )
+                    {
+                        if lock(&control).cancel.is_none()
+                            && !deadline.is_some_and(|at| Instant::now() >= at)
+                        {
                             failure = Some(failed("line delivery failed"));
                         }
                         break;
@@ -486,11 +562,50 @@ fn run(
         if exited && (lock(&control).cancel.is_some() || (stdout.eof && stderr.eof && status.eof)) {
             break;
         }
-        std::thread::sleep(Duration::from_millis(5));
+        if drain_deadline.is_some_and(|at| Instant::now() >= at) {
+            failure
+                .get_or_insert_with(|| failed("supervisor exited with inherited pipes still open"));
+            break;
+        }
+        let next = deadline
+            .filter(|_| lock(&control).cancel.is_none())
+            .into_iter()
+            .chain(
+                termination
+                    .filter(|_| !killed && !exited)
+                    .map(|at| at + Duration::from_secs(2)),
+            )
+            .chain(drain_deadline)
+            .min();
+        let mut fds = vec![(wake.as_fd(), false)];
+        if !exited {
+            fds.push((pidfd.as_fd(), false));
+        }
+        if !stdout.eof {
+            fds.push((stdout.file.as_fd(), false));
+        }
+        if !stderr.eof {
+            fds.push((stderr.file.as_fd(), false));
+        }
+        if !status.eof {
+            fds.push((status.file.as_fd(), false));
+        }
+        if let Some(input) = &input {
+            fds.push((input.as_fd(), true));
+        }
+        if let Err(e) = native::wait(&fds, next) {
+            failure = Some(failed(e));
+        }
     }
     if lines && !line.is_empty() && lock(&control).cancel.is_none() {
         let (value, _) = text(line, limit);
-        send(&events, ProcessEvent::Line(value), &control);
+        send(
+            &events,
+            ProcessEvent::Line(value),
+            &control,
+            &wake,
+            deadline,
+        );
     }
     let cancel = lock(&control).cancel.clone();
     let result = if let Some(error) = failure {
@@ -567,11 +682,16 @@ mod tests {
         native::nonblocking(&status).unwrap();
         native::nonblocking(child.stdout.as_ref().unwrap()).unwrap();
         native::nonblocking(child.stderr.as_ref().unwrap()).unwrap();
+        let (wake_read, wake_write) = UnixStream::pair().unwrap();
+        native::nonblocking(&wake_write).unwrap();
+        let wake_read = async_io::Async::new(wake_read).unwrap();
+        let pidfd = native::pidfd(pid).unwrap();
         let control = Arc::new(Mutex::new(Control {
             pid,
             done: false,
             reaped: false,
             cancel: None,
+            wake: wake_write,
         }));
         let (events, rx) = async_channel::bounded(64);
         let owner = InstanceId {
@@ -584,6 +704,7 @@ mod tests {
         }));
         let lease = Arc::new(Lease {
             counts: pool,
+            changed: Arc::new(event_listener::Event::new()),
             id: 1,
         });
         let worker_lease = lease.clone();
@@ -599,6 +720,8 @@ mod tests {
                 cloned,
                 events,
                 worker_lease,
+                wake_read,
+                pidfd,
             )
         });
         let process = Process {

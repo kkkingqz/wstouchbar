@@ -283,3 +283,173 @@ fn shared_process_quota_follows_remaining_owners() {
         let _ = finish(process);
     }
 }
+
+#[test]
+fn setsid_descendants_are_reaped_and_release_quota_on_exit_cancel_and_timeout() {
+    for mode in ["escaped-exit", "escaped", "timeout"] {
+        let t = Temp::new();
+        let path = t.0.join("pids");
+        let pool = SpawnPool::new(env!("CARGO_BIN_EXE_touchbar-spawn-helper").into(), 1, 1);
+        let process = pool
+            .start(
+                owner(1),
+                spec(&[
+                    if mode == "timeout" { "escaped" } else { mode },
+                    path.to_str().unwrap(),
+                ]),
+                false,
+                (mode == "timeout").then_some(300),
+            )
+            .unwrap();
+        let pids = wait_pids(&path);
+        if mode == "escaped" {
+            process.cancel();
+        }
+        let result = finish(&process);
+        if mode == "escaped-exit" {
+            assert_eq!(result.unwrap().status, 0);
+        } else {
+            assert_eq!(
+                result,
+                Err(if mode == "timeout" {
+                    EffectError::Timeout
+                } else {
+                    EffectError::Cancelled
+                })
+            );
+        }
+        assert!(
+            pids.iter().all(|pid| !is_running(*pid)),
+            "escaped descendants: {pids:?}"
+        );
+        assert_eq!(pool.active(), 0);
+    }
+}
+
+#[test]
+fn silent_spawn_does_not_periodically_wake_worker_or_helper() {
+    const CHILD: &str = "TOUCHBAR_IDLE_WAKE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "silent_spawn_does_not_periodically_wake_worker_or_helper",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(result.success());
+        return;
+    }
+    let pool = pool();
+    let process = pool.start(owner(1), spec(&["idle"]), true, None).unwrap();
+    let ProcessEvent::Line(pid) = process.events.recv_blocking().unwrap() else {
+        panic!("no pid")
+    };
+    let target: u32 = pid.parse().unwrap();
+    let status = fs::read_to_string(format!("/proc/{target}/status")).unwrap();
+    let helper: u32 = status
+        .lines()
+        .find_map(|line| line.strip_prefix("PPid:\t"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let worker = fs::read_dir("/proc/self/task")
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| {
+            fs::read_to_string(entry.path().join("comm"))
+                .is_ok_and(|name| name.trim() == "touchbar-spawn")
+        })
+        .unwrap()
+        .path();
+    fn switches(path: &std::path::Path) -> u64 {
+        fs::read_to_string(path.join("status"))
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.strip_prefix("voluntary_ctxt_switches:\t"))
+            .map(|value| value.parse::<u64>().unwrap())
+            .sum()
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    let helper = PathBuf::from(format!("/proc/{helper}"));
+    let before = (switches(&worker), switches(&helper));
+    std::thread::sleep(Duration::from_millis(250));
+    let wakeups = (switches(&worker) - before.0, switches(&helper) - before.1);
+    process.cancel();
+    let _ = finish(&process);
+    assert!(
+        wakeups.0 < 10 && wakeups.1 < 10,
+        "idle wakeups in 250ms: {wakeups:?}"
+    );
+}
+
+#[test]
+fn abrupt_parent_death_kills_setsid_descendants() {
+    let t = Temp::new();
+    let path = t.0.join("pids");
+    let mut parent = std::process::Command::new(env!("CARGO_BIN_EXE_touchbar-effects-test-helper"))
+        .args([
+            "spawn-parent",
+            env!("CARGO_BIN_EXE_touchbar-spawn-helper"),
+            path.to_str().unwrap(),
+            "escaped",
+        ])
+        .spawn()
+        .unwrap();
+    let pids = wait_pids(&path);
+    parent.kill().unwrap();
+    parent.wait().unwrap();
+    let end = Instant::now() + Duration::from_secs(3);
+    while pids.iter().any(|pid| is_running(*pid)) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for pid in &pids {
+        if is_running(*pid) {
+            rustix::process::kill_process(
+                rustix::process::Pid::from_raw(i32::try_from(*pid).unwrap()).unwrap(),
+                rustix::process::Signal::KILL,
+            )
+            .unwrap();
+            panic!("escaped child survived parent death");
+        }
+    }
+}
+
+#[test]
+fn dead_helper_cannot_hold_quota_forever_through_inherited_pipes() {
+    let t = Temp::new();
+    let path = t.0.join("pids");
+    let pool = pool();
+    let process = pool
+        .start(
+            owner(1),
+            spec(&["escaped", path.to_str().unwrap()]),
+            false,
+            None,
+        )
+        .unwrap();
+    let pids = wait_pids(&path);
+    let status = fs::read_to_string(format!("/proc/{}/status", pids[0])).unwrap();
+    let helper = status
+        .lines()
+        .find_map(|line| line.strip_prefix("PPid:\t"))
+        .unwrap()
+        .parse::<i32>()
+        .unwrap();
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(helper).unwrap(),
+        rustix::process::Signal::KILL,
+    )
+    .unwrap();
+    let result = std::panic::catch_unwind(|| finish(&process));
+    // A killed subreaper cannot collect an escaped child; fixture owns its cleanup.
+    for pid in pids {
+        if let Some(pid) = rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()) {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+        }
+    }
+    assert!(result.unwrap().is_err());
+    assert_eq!(pool.active(), 0);
+}

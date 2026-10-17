@@ -2,6 +2,8 @@ use std::{
     io::{Read, Write},
     time::Duration,
 };
+// The escaped-exit fixture deliberately leaves collection to the supervisor.
+#[allow(clippy::zombie_processes)]
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -27,8 +29,12 @@ fn main() {
             }
         }
         Some("lines") => print!("one\ntwo\r\ntail"),
-        Some("descendants") => {
-            let mut child = std::process::Command::new(&args[0])
+        Some("descendants") | Some("escaped") | Some("escaped-exit") => {
+            let mut command = std::process::Command::new(&args[0]);
+            if args[1] != "descendants" {
+                detach(&mut command);
+            }
+            let mut child = command
                 .arg("ignore-term")
                 .arg(format!("{}.ready", args[2]))
                 .spawn()
@@ -37,7 +43,9 @@ fn main() {
                 std::thread::sleep(Duration::from_millis(1));
             }
             std::fs::write(&args[2], format!("{} {}", std::process::id(), child.id())).unwrap();
-            let _ = child.wait();
+            if args[1] != "escaped-exit" {
+                let _ = child.wait();
+            }
         }
         Some("ignore-term") => {
             ignore_term();
@@ -55,7 +63,11 @@ fn main() {
                         number: 1,
                         generation: Generation(1),
                     },
-                    SpawnSpec::new(vec![args[0].clone(), "descendants".into(), args[3].clone()]),
+                    SpawnSpec::new(vec![
+                        args[0].clone(),
+                        args.get(4).cloned().unwrap_or_else(|| "descendants".into()),
+                        args[3].clone(),
+                    ]),
                     false,
                     None,
                 )
@@ -63,6 +75,11 @@ fn main() {
             loop {
                 std::thread::sleep(Duration::from_secs(60));
             }
+        }
+        Some("idle") => {
+            println!("{}", std::process::id());
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(Duration::from_secs(60));
         }
         Some("sleep") => loop {
             std::thread::sleep(Duration::from_secs(60));
@@ -75,5 +92,20 @@ fn ignore_term() {
     // SAFETY: fixture-only process installs an ignore disposition to exercise SIGKILL escalation.
     unsafe {
         libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+}
+
+#[allow(unsafe_code)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: setsid is async-signal-safe, called only in the forked fixture child.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
     }
 }
