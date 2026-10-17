@@ -796,5 +796,43 @@ fn validate_node(
     if let Some(t) = &node.template {
         validate_node(t, &field(path, "template"), depth + 1, true, budget)?;
     }
+    // D104: Core currently has one rectangle for both hit testing and value
+    // coordinates. Spatial motion would desynchronize these after clipping.
+    if let Some(motion) = &node.motion
+        && contains_interactive(node)
+    {
+        check(
+            spatial_identity(&motion.from) && spatial_identity(&motion.to),
+            &field(path, "motion"),
+            "interactive subtrees support only opacity motion in stage 3",
+        )?;
+    }
     Ok(())
+}
+
+fn contains_interactive(node: &LayoutNode) -> bool {
+    matches!(
+        node.kind,
+        LayoutKind::Button
+            | LayoutKind::Key
+            | LayoutKind::KeyRow
+            | LayoutKind::Slider
+            | LayoutKind::Scrubber
+    ) || node.children.iter().any(contains_interactive)
+        || node.template.as_deref().is_some_and(contains_interactive)
+        || node
+            .variants
+            .iter()
+            .any(|variant| contains_interactive(&variant.layout))
+}
+
+fn spatial_identity(transform: &TransformDefinition) -> bool {
+    [&transform.x, &transform.y, &transform.scale]
+        .into_iter()
+        .zip([0.0, 0.0, 1.0])
+        .all(|(binding, identity)| match binding {
+            None => true,
+            Some(ScalarBinding::Number(value)) => *value == identity,
+            Some(ScalarBinding::State(_)) => false,
+        })
 }

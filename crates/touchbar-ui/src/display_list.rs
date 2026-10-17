@@ -230,9 +230,9 @@ impl DisplayList {
     }
     /// Call after deserializing and before GPU use. Reject invalid resources,
     /// numeric values and unbalanced groups rather than relying on GL behavior.
+    /// This also accepts a surface composed of multiple validated instances.
     pub fn validate(&self) -> Result<()> {
         color(self.clear)?;
-        let mut shaders = 0;
         for (key, resource) in &self.resources {
             if *key != resource.key() {
                 bail!("resource content hash mismatch");
@@ -249,15 +249,10 @@ impl DisplayList {
                 }
                 Resource::Shader { body } => {
                     EffectProgram::compile(body)?;
-                    shaders += 1;
                 }
             }
         }
-        if shaders > crate::MAX_EFFECT_PROGRAMS {
-            bail!("too many shader programs");
-        }
         let mut stack = Vec::new();
-        let mut effects = 0;
         for command in &self.commands {
             match command {
                 DrawCommand::RoundedRect {
@@ -325,7 +320,6 @@ impl DisplayList {
                         color(c)?;
                     }
                     nonnegative(t.corner_radius)?;
-                    effects += 1;
                 }
                 DrawCommand::Line {
                     start,
@@ -372,11 +366,32 @@ impl DisplayList {
                 DrawCommand::PopClip => pop(&mut stack, 2)?,
             }
         }
-        if effects > crate::MAX_EFFECT_NODES {
-            bail!("too many shader nodes");
-        }
         if !stack.is_empty() {
             bail!("unclosed display group");
+        }
+        Ok(())
+    }
+
+    /// Apply plugin quotas before merging this instance into a surface frame.
+    pub fn validate_instance(&self) -> Result<()> {
+        self.validate()?;
+        if self
+            .resources
+            .values()
+            .filter(|r| matches!(r, Resource::Shader { .. }))
+            .count()
+            > crate::MAX_EFFECT_PROGRAMS
+        {
+            bail!("too many shader programs in instance");
+        }
+        if self
+            .commands
+            .iter()
+            .filter(|c| matches!(c, DrawCommand::ShaderEffect { .. }))
+            .count()
+            > crate::MAX_EFFECT_NODES
+        {
+            bail!("too many shader nodes in instance");
         }
         Ok(())
     }

@@ -368,6 +368,78 @@ fn shaders_images_and_all_style_bindings_are_materialized() {
             .any(|r| matches!(r, touchbar_ui::Resource::Raster { width: 1, .. }))
     );
 }
+
+fn composed_shaders(count: usize, unique: bool, panel: bool) -> (Scene, Documents) {
+    let mut items = Vec::new();
+    let mut documents = Documents::default();
+    for index in 0..count {
+        let source = format!(
+            "let color = vec4<f32>(0.{}, 0.3, 0.4, 1.0);",
+            if unique { index + 1 } else { 1 }
+        );
+        let mut layout =
+            format!("[layout]\nkind='shader-effect'\neffect={{id=1,source='{source}'}}");
+        if panel && index == 0 {
+            layout.push_str(&format!("\n[[panels]]\nid='extra'\n[panels.layout]\nkind='shader-effect'\neffect={{id=2,source='{source}'}}"));
+        }
+        let (mut scene, mut docs) = fixture(&layout, vec![]);
+        let mut item = scene.items.remove(0);
+        let mut document = docs.sets.remove(&item.set.reference).unwrap();
+        let id = format!("shader{index}");
+        Arc::make_mut(&mut document).file.id = id.clone();
+        item.set.reference = format!("p/{id}").parse().unwrap();
+        item.instance.number = index as u64 + 1;
+        item.slot = format!("slot{index}").parse().unwrap();
+        documents.sets.insert(item.set.reference.clone(), document);
+        items.push(item);
+    }
+    let presentation = panel.then(|| touchbar_core::PresentationScene {
+        id: PresentationId(1),
+        owner: items[0].instance,
+        panel: items[0].set.panels[0].clone(),
+        placement: Placement::Region,
+        lifecycle: PresentationLifecycle::Transient,
+        anchor: Rect::default(),
+        region: Rect::default(),
+    });
+    (
+        Scene {
+            profile: None,
+            items,
+            presentation,
+        },
+        documents,
+    )
+}
+
+fn assert_composed_shaders(count: usize, unique: bool, panel: bool) {
+    let (scene, docs) = composed_shaders(count, unique, panel);
+    let frame = draw(&scene, &docs);
+    assert!(frame.faults.is_empty(), "{:?}", frame.faults);
+    assert_eq!(
+        frame
+            .display_list
+            .commands
+            .iter()
+            .filter(|c| matches!(c, touchbar_ui::DrawCommand::ShaderEffect { .. }))
+            .count(),
+        count + usize::from(panel)
+    );
+    frame.display_list.validate().unwrap();
+}
+
+#[test]
+fn shader_node_quota_is_per_instance_not_composed_surface() {
+    assert_composed_shaders(5, false, false);
+}
+#[test]
+fn shader_program_quota_is_per_instance_not_composed_surface() {
+    assert_composed_shaders(9, true, false);
+}
+#[test]
+fn panel_shader_can_compose_with_four_valid_instances() {
+    assert_composed_shaders(4, false, true);
+}
 #[test]
 fn geometry_cache_reacts_to_surface_percentages_even_when_slot_width_is_fixed() {
     let (scene, docs) = fixture(
@@ -686,7 +758,7 @@ fn profile_groups_preserve_empty_slot_bounds_and_profile_units_for_spaces() {
 #[test]
 fn changed_state_preserves_unchanged_motion_timeline_and_layout_geometry() {
     let (mut scene, docs) = fixture(
-        "[layout]\nkind='button'\nid='go'\nlabel_from='label'\nmotion={id=1,duration_ms=1000,easing='linear',playback='once',from={x=0},to={x=100}}",
+        "[layout]\nkind='button'\nid='go'\nlabel_from='label'\nmotion={id=1,duration_ms=1000,easing='linear',playback='once',from={opacity=0},to={opacity=1}}",
         vec![scalar("label", Scalar::Text("One".into()))],
     );
     let mut renderer = SceneRenderer::default();
@@ -715,7 +787,7 @@ fn changed_state_preserves_unchanged_motion_timeline_and_layout_geometry() {
         )
         .unwrap();
     assert_eq!(initial.layout.hit_map, changed.layout.hit_map);
-    assert!(changed.display_list.commands.iter().any(|c|matches!(c,touchbar_ui::DrawCommand::PushTransform{transform,..} if transform.translation.x==30.0)));
+    assert!(changed.display_list.commands.iter().any(|c|matches!(c,touchbar_ui::DrawCommand::PushTransform{transform,..} if transform.opacity==0.5)));
     let counts = renderer.cache_stats();
     renderer
         .frame(

@@ -899,6 +899,10 @@ impl Session {
         let records = self.diagnostics.error(self.now(), instance, text);
         self.records(records);
     }
+    pub(crate) fn warning(&mut self, text: &str) {
+        let records = self.diagnostics.report(self.now(), None, text, Level::Warn);
+        self.records(records);
+    }
     fn records(&mut self, records: Vec<Record>) {
         for record in records {
             let instance = record.instance;

@@ -359,7 +359,7 @@ impl SceneRenderer {
         let materialized = match painter
             .materialize(&cached.resolved.scene, time, policy)
             .and_then(|scene| {
-                u::DisplayList::from_scene(&scene, time, policy)?;
+                u::DisplayList::from_scene(&scene, time, policy)?.validate_instance()?;
                 Ok(scene)
             }) {
             Ok(scene) => scene,

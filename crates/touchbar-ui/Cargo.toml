@@ -18,3 +18,7 @@ naga.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+rustix.workspace = true

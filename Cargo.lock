@@ -2838,10 +2838,12 @@ dependencies = [
  "cosmic-text",
  "naga",
  "resvg",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
  "taffy",
+ "tempfile",
 ]
 
 [[package]]

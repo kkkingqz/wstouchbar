@@ -147,6 +147,9 @@ async fn run_async(cli: Cli) -> Result<()> {
     let result: Result<()> = async {
         loop {
             session.pump()?;
+            for issue in watcher.take_issues() {
+                session.warning(&format!("configuration watcher: {issue}"));
+            }
             if session.has_pending() {
                 reload_pending |=
                     poll_control(&mut control, &mut session, fake_desktop.as_ref()).await?;

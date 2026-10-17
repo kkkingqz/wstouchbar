@@ -202,6 +202,85 @@ fn watcher_observes_new_nested_file_and_coalesces_changes() {
     assert!(!watcher.poll(Duration::from_millis(500)).unwrap());
     assert!(watcher.poll(Duration::from_millis(600)).unwrap());
 }
+
+#[test]
+fn watcher_unreadable_descendant_keeps_catalog_and_recovers() {
+    use std::os::unix::{fs::PermissionsExt, process::CommandExt};
+    if rustix::process::geteuid().is_root() {
+        let cache = Temp::new();
+        fs::set_permissions(&cache.0, fs::Permissions::from_mode(0o777)).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "watcher_unreadable_descendant_keeps_catalog_and_recovers",
+            ])
+            .env("XDG_CACHE_HOME", &cache.0)
+            .uid(65534)
+            .gid(65534)
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "unprivileged watcher test failed: {status}"
+        );
+        return;
+    }
+    let t = Temp::new();
+    let (req, mut runtime, core, mut loader) = setup(&t);
+    let p = plugin(&req.paths[0], "p", "ok");
+    assert!(load(&mut loader, &req, &mut runtime, &core).accepted);
+    let accepted = loader.current().unwrap().catalog.clone();
+    let mut watcher = ReloadWatcher::new(&req).unwrap();
+    let blocked = p.join("unused");
+    fs::create_dir(&blocked).unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o0)).unwrap();
+    assert!(
+        fs::read_dir(&blocked).is_err(),
+        "test must run without DAC override"
+    );
+    assert!(!watcher.poll(Duration::ZERO).unwrap());
+    assert!(!watcher.take_issues().is_empty());
+    assert!(watcher.poll(Duration::from_millis(200)).unwrap());
+    assert!(load(&mut loader, &req, &mut runtime, &core).accepted);
+    assert_eq!(loader.current().unwrap().catalog, accepted);
+    let startup = ReloadWatcher::new(&req);
+    assert!(
+        startup.is_ok(),
+        "unreadable unused directory must not prevent startup"
+    );
+    fs::write(p.join("sets/key.toml"), "broken").unwrap();
+    assert!(!watcher.poll(Duration::from_millis(300)).unwrap());
+    assert!(watcher.poll(Duration::from_millis(500)).unwrap());
+    assert!(!load(&mut loader, &req, &mut runtime, &core).accepted);
+    assert_eq!(loader.current().unwrap().catalog, accepted);
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!watcher.poll(Duration::from_millis(600)).unwrap());
+    assert!(watcher.poll(Duration::from_millis(800)).unwrap());
+    fs::write(blocked.join("new.txt"), "new").unwrap();
+    assert!(!watcher.poll(Duration::from_millis(900)).unwrap());
+    assert!(watcher.poll(Duration::from_millis(1100)).unwrap());
+}
+
+#[test]
+fn watcher_directory_budget_does_not_abort_startup() {
+    let t = Temp::new();
+    let (req, _, _, _) = setup(&t);
+    let p = plugin(&req.paths[0], "p", "ok");
+    for index in 0..4096 {
+        fs::create_dir(p.join(format!("unused{index}"))).unwrap();
+    }
+    let mut watcher =
+        ReloadWatcher::new(&req).expect("watch budget must not terminate the session");
+    assert!(
+        watcher
+            .take_issues()
+            .iter()
+            .any(|issue| issue.contains("4096"))
+    );
+    assert_eq!(watcher.deadline(), Some(Duration::from_secs(1)));
+    assert!(!watcher.poll(Duration::from_secs(1)).unwrap());
+    assert_eq!(watcher.deadline(), Some(Duration::from_secs(2)));
+}
 #[test]
 fn declared_assets_are_loaded_and_hashed_and_png_sizes_are_verified() {
     let t = Temp::new();

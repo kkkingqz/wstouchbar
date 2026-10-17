@@ -19,6 +19,14 @@ impl CpuPainter {
             symbols: SymbolCatalog::default(),
         }
     }
+    fn with_text<T>(&self, work: impl FnOnce(&mut TextEngine) -> T) -> T {
+        let mut engine = self.text.borrow_mut();
+        let result = work(&mut engine);
+        // GL owns a content-addressed resource cache. The legacy texture-ID
+        // notifications have no consumer here, even when an operation fails.
+        engine.take_evicted_image_ids();
+        result
+    }
     pub fn display_list(
         &mut self,
         scene: &Scene,
@@ -63,17 +71,27 @@ impl CpuPainter {
                         TextOverflow::Clip => (TextRasterMode::Clip, *align),
                         TextOverflow::Marquee { .. } => (TextRasterMode::Clip, TextAlign::Leading),
                     };
-                    let mut engine = self.text.borrow_mut();
-                    let measured =
-                        engine.measure_with_mode(text, width, height, *size, align, mode, false)?;
-                    let raster_width = if matches!(overflow, TextOverflow::Marquee { .. }) {
-                        measured.width.ceil().max(1.0) as u32
-                    } else {
-                        width
-                    };
-                    let image = engine
-                        .rasterize_with_mode(text, raster_width, height, *size, align, mode, false)?
-                        .clone();
+                    let (measured, image) = self.with_text(|engine| -> Result<_> {
+                        let measured = engine
+                            .measure_with_mode(text, width, height, *size, align, mode, false)?;
+                        let raster_width = if matches!(overflow, TextOverflow::Marquee { .. }) {
+                            measured.width.ceil().max(1.0) as u32
+                        } else {
+                            width
+                        };
+                        let image = engine
+                            .rasterize_with_mode(
+                                text,
+                                raster_width,
+                                height,
+                                *size,
+                                align,
+                                mode,
+                                false,
+                            )?
+                            .clone();
+                        Ok((measured, image))
+                    })?;
                     result.push_clip(rect);
                     match overflow {
                         TextOverflow::Marquee { speed, gap } if measured.width > rect.width => {
@@ -139,9 +157,73 @@ impl LayoutMeasurer for CpuPainter {
     fn measure_text(&self, text: &str, size: f32, maximum: Size) -> Size {
         let width = maximum.width.clamp(1.0, 8192.0) as u32;
         let height = maximum.height.clamp(1.0, 512.0) as u32;
-        self.text
-            .borrow_mut()
-            .measure(text, width, height, size, TextAlign::Leading)
+        self.with_text(|engine| engine.measure(text, width, height, size, TextAlign::Leading))
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn small_painter() -> CpuPainter {
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_font_data(include_bytes!("../../../assets/fonts/test/InterVariable.ttf").to_vec());
+        db.set_sans_serif_family("Inter Variable");
+        CpuPainter {
+            text: RefCell::new(TextEngine::with_capacity(
+                FontSystem::new_with_locale_and_db("en-US".into(), db),
+                2,
+            )),
+            symbols: SymbolCatalog::default(),
+        }
+    }
+
+    #[test]
+    fn measurement_evictions_leave_no_unused_id_history() {
+        let mut painter = small_painter();
+        for number in 0..100 {
+            let size = painter.measure_text(&number.to_string(), 12.0, Size::new(80.0, 20.0));
+            assert!(size.width > 0.0);
+            let text = painter.text.get_mut();
+            assert!(text.cached_run_count() <= 2);
+            assert!(
+                text.take_evicted_image_ids().is_empty(),
+                "CPU owner must consume obsolete texture IDs"
+            );
+        }
+    }
+
+    #[test]
+    fn raster_evictions_are_drained_even_if_later_primitive_fails() {
+        let mut painter = small_painter();
+        for number in 0..100 {
+            let mut scene = Scene::new(crate::Color::TRANSPARENT);
+            scene.text(
+                Rect::new(0.0, 0.0, 80.0, 20.0),
+                number.to_string(),
+                12.0,
+                crate::Color::WHITE,
+                TextAlign::Leading,
+            );
+            scene.text(
+                Rect::new(f32::NAN, 0.0, 80.0, 20.0),
+                "bad",
+                12.0,
+                crate::Color::WHITE,
+                TextAlign::Leading,
+            );
+            assert!(
+                painter
+                    .materialize(&scene, Duration::ZERO, MotionPolicy::Full)
+                    .is_err()
+            );
+            let text = painter.text.get_mut();
+            assert!(text.cached_run_count() <= 2);
+            assert!(
+                text.take_evicted_image_ids().is_empty(),
+                "failed frames must not accumulate eviction IDs"
+            );
+        }
     }
 }

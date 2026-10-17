@@ -12,12 +12,17 @@ struct WatchRecord {
     inode: u64,
 }
 const DEBOUNCE: Duration = Duration::from_millis(200);
-/// Nonblocking watcher. The caller supplies monotonic elapsed time and schedules a poll at deadline().
+const RETRY: Duration = Duration::from_secs(1);
+const MAX_DIRECTORIES: usize = 4096;
+/// Nonblocking watcher. Only transport failures are fatal; tree maintenance is
+/// best-effort with bounded diagnostics and a monotonic retry deadline.
 pub struct ReloadWatcher {
     inotify: Inotify,
     request: LoadRequest,
     watches: BTreeMap<PathBuf, WatchRecord>,
     pending: Option<Duration>,
+    retry: Option<Duration>,
+    issues: Vec<String>,
 }
 impl ReloadWatcher {
     pub fn new(request: &LoadRequest) -> Result<Self, String> {
@@ -26,12 +31,23 @@ impl ReloadWatcher {
             request: request.clone(),
             watches: BTreeMap::new(),
             pending: None,
+            retry: None,
+            issues: Vec::new(),
         };
-        this.refresh()?;
+        if !this.refresh() {
+            this.retry = Some(RETRY);
+        }
         Ok(this)
     }
     pub fn deadline(&self) -> Option<Duration> {
-        self.pending.map(|t| t.saturating_add(DEBOUNCE))
+        self.pending
+            .map(|t| t.saturating_add(DEBOUNCE))
+            .into_iter()
+            .chain(self.retry)
+            .min()
+    }
+    pub fn take_issues(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.issues)
     }
     pub fn poll(&mut self, now: Duration) -> Result<bool, String> {
         let mut buffer = [0; 64 * 1024];
@@ -56,18 +72,25 @@ impl ReloadWatcher {
                 Err(e) => return Err(e.to_string()),
             }
         }
-        if changed {
-            self.pending = Some(now);
-            self.refresh()?;
+        let retry_due = self.retry.is_some_and(|t| now >= t);
+        if changed || retry_due {
+            let complete = self.refresh();
+            self.retry = (!complete).then(|| now.saturating_add(RETRY));
+            if changed || (retry_due && complete) {
+                self.pending = Some(now);
+            }
         }
-        if self.deadline().is_some_and(|t| now >= t) {
+        if self
+            .pending
+            .is_some_and(|t| now >= t.saturating_add(DEBOUNCE))
+        {
             self.pending = None;
             return Ok(true);
         }
         Ok(false)
     }
     fn add(&mut self, path: &Path) -> Result<(), String> {
-        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        let metadata = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
         if self
             .watches
             .get(path)
@@ -78,7 +101,7 @@ impl ReloadWatcher {
         if let Some(old) = self.watches.remove(path) {
             let _ = self.inotify.watches().remove(old.descriptor);
         }
-        if self.watches.len() >= 4096 {
+        if self.watches.len() >= MAX_DIRECTORIES {
             return Err("plugin watcher exceeds 4096 directories".into());
         }
         let wd = self
@@ -106,63 +129,139 @@ impl ReloadWatcher {
         );
         Ok(())
     }
-    fn refresh(&mut self) -> Result<(), String> {
+    fn refresh(&mut self) -> bool {
         let mut wanted = BTreeSet::new();
+        let mut complete = true;
         for file in [&self.request.config_file, &self.request.bindings_file] {
-            let mut parent = file.parent().unwrap_or(Path::new("."));
-            while !parent.is_dir() {
-                parent = parent.parent().ok_or("no existing config parent")?;
+            match existing_ancestor(file.parent().unwrap_or(Path::new("."))) {
+                Ok(path) => {
+                    wanted.insert(path);
+                }
+                Err(error) => {
+                    issue(&mut self.issues, error);
+                    complete = false;
+                }
             }
-            wanted.insert(parent.canonicalize().map_err(|e| e.to_string())?);
         }
+        let mut visited = BTreeSet::new();
         for root in &self.request.paths {
-            let mut ancestor = root.as_path();
-            while !ancestor.is_dir() {
-                ancestor = ancestor.parent().ok_or("no existing plugin parent")?;
+            // A parent remains useful if the root is replaced or loses access.
+            for candidate in [root.as_path(), root.parent().unwrap_or(Path::new("."))] {
+                match existing_ancestor(candidate) {
+                    Ok(path) if wanted.contains(&path) || wanted.len() < MAX_DIRECTORIES => {
+                        wanted.insert(path);
+                    }
+                    Ok(_) => {
+                        issue(
+                            &mut self.issues,
+                            "plugin watcher exceeds 4096 directories".into(),
+                        );
+                        complete = false;
+                    }
+                    Err(error) => {
+                        issue(&mut self.issues, error);
+                        complete = false;
+                    }
+                }
             }
-            wanted.insert(ancestor.canonicalize().map_err(|e| e.to_string())?);
             let mut stack = if root.is_dir() {
                 vec![root.clone()]
             } else {
                 vec![]
             };
-            let mut visited = BTreeSet::new();
             while let Some(path) = stack.pop() {
-                let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+                let canonical = match path.canonicalize() {
+                    Ok(path) => path,
+                    Err(e) => {
+                        issue(&mut self.issues, format!("{}: {e}", path.display()));
+                        complete = false;
+                        continue;
+                    }
+                };
                 if !visited.insert(canonical.clone()) {
                     continue;
                 }
-                wanted.insert(canonical.clone());
-                if wanted.len() > 4096 {
-                    return Err("plugin watcher exceeds 4096 directories".into());
+                if !wanted.contains(&canonical) && wanted.len() >= MAX_DIRECTORIES {
+                    issue(
+                        &mut self.issues,
+                        "plugin watcher exceeds 4096 directories".into(),
+                    );
+                    complete = false;
+                    break;
                 }
-                for entry in std::fs::read_dir(&canonical).map_err(|e| e.to_string())? {
-                    let entry = entry.map_err(|e| e.to_string())?;
-                    if entry.path().is_dir() {
-                        stack.push(entry.path());
+                wanted.insert(canonical.clone());
+                let entries = match std::fs::read_dir(&canonical) {
+                    Ok(entries) => entries,
+                    Err(e) => {
+                        issue(&mut self.issues, format!("{}: {e}", canonical.display()));
+                        complete = false;
+                        continue;
+                    }
+                };
+                for entry in entries {
+                    match entry {
+                        Ok(entry) if entry.path().is_dir() => {
+                            if visited.len() + stack.len() >= MAX_DIRECTORIES {
+                                issue(
+                                    &mut self.issues,
+                                    "plugin watcher exceeds 4096 directories".into(),
+                                );
+                                complete = false;
+                                break;
+                            }
+                            stack.push(entry.path());
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            issue(&mut self.issues, format!("{}: {e}", canonical.display()));
+                            complete = false;
+                        }
                     }
                 }
             }
         }
-        // Canonical names track symlink targets; obsolete watches are removed on directory replacement.
-        let stale: Vec<_> = self
-            .watches
-            .keys()
-            .filter(|p| !wanted.contains(*p))
-            .cloned()
-            .collect();
-        for path in stale {
-            if let Some(wd) = self.watches.remove(&path) {
-                let _ = self.inotify.watches().remove(wd.descriptor);
+        // An incomplete scan cannot prove that an existing watch is obsolete.
+        if complete {
+            let stale: Vec<_> = self
+                .watches
+                .keys()
+                .filter(|p| !wanted.contains(*p))
+                .cloned()
+                .collect();
+            for path in stale {
+                if let Some(wd) = self.watches.remove(&path) {
+                    let _ = self.inotify.watches().remove(wd.descriptor);
+                }
             }
         }
         for path in wanted {
-            self.add(&path)?;
+            if let Err(error) = self.add(&path) {
+                issue(&mut self.issues, error);
+                complete = false;
+            }
         }
-        Ok(())
+        complete
     }
 }
-
+fn existing_ancestor(path: &Path) -> Result<PathBuf, String> {
+    let mut path = if path.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        path
+    };
+    while !path.is_dir() {
+        path = path
+            .parent()
+            .ok_or_else(|| format!("no existing parent: {}", path.display()))?;
+    }
+    path.canonicalize()
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+fn issue(issues: &mut Vec<String>, message: String) {
+    if issues.len() < 32 && !issues.contains(&message) {
+        issues.push(message);
+    }
+}
 impl std::os::fd::AsFd for ReloadWatcher {
     fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
         self.inotify.as_fd()

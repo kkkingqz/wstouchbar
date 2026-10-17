@@ -1,7 +1,10 @@
 use sha2::Digest;
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use anyhow::{Context as _, Result, bail};
@@ -85,9 +88,27 @@ impl SvgRasterizer {
             return Ok(image.clone());
         }
 
-        let options = usvg::Options::default();
+        // Symbolic SVG is self-contained vector data. usvg's defaults read local
+        // files and decode embedded images outside the loader's IO/size budget.
+        let image_resource = AtomicBool::new(false);
+        let options = usvg::Options {
+            image_href_resolver: usvg::ImageHrefResolver {
+                resolve_string: Box::new(|_, _| {
+                    image_resource.store(true, Ordering::Relaxed);
+                    None
+                }),
+                resolve_data: Box::new(|_, _, _| {
+                    image_resource.store(true, Ordering::Relaxed);
+                    None
+                }),
+            },
+            ..Default::default()
+        };
         let tree =
             usvg::Tree::from_str(asset.source(), &options).context("parse static SVG asset")?;
+        if image_resource.load(Ordering::Relaxed) {
+            bail!("image resources are not supported in symbolic SVG; declare a PNG asset instead");
+        }
         let source = tree.size();
         let scale_x = width as f32 / source.width();
         let scale_y = height as f32 / source.height();
@@ -215,5 +236,86 @@ mod tests {
                 .rasterize(&invalid, 10, 10)
                 .is_err()
         );
+    }
+
+    fn rejects_image_reference(href: &str, filter: bool) {
+        let element = if filter {
+            format!(
+                r#"<defs><filter id="f"><feImage href="{href}"/></filter></defs><rect width="10" height="10" filter="url(#f)"/>"#
+            )
+        } else {
+            format!(r#"<image href="{href}" width="10" height="10"/>"#)
+        };
+        let asset = SvgAsset::new(
+            1,
+            1,
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">{element}</svg>"#
+            ),
+        )
+        .unwrap();
+        let error = SvgRasterizer::default()
+            .rasterize(&asset, 10, 10)
+            .expect_err("symbolic SVG must not resolve image resources");
+        assert!(error.to_string().contains("image resources"), "{error}");
+    }
+
+    #[test]
+    fn symbolic_svg_rejects_external_and_embedded_images() {
+        let directory = tempfile::tempdir().unwrap();
+        let external = directory.path().join("outside.svg");
+        std::fs::write(&external, ICON).unwrap();
+        for filter in [false, true] {
+            rejects_image_reference(external.to_str().unwrap(), filter);
+            rejects_image_reference(
+                "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+                filter,
+            );
+        }
+    }
+
+    #[test]
+    fn symbolic_svg_rejects_fifo_without_blocking() {
+        const CHILD: &str = "TOUCHBAR_SVG_FIFO_TEST";
+        if let Some(path) = std::env::var_os(CHILD) {
+            rejects_image_reference(path.to_str().unwrap(), false);
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("image.svg");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "asset::tests::symbolic_svg_rejects_fifo_without_blocking",
+            ])
+            .env(CHILD, &fifo)
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "SVG child failed: {status}");
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("SVG rasterizer blocked reading an external FIFO");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn symbolic_svg_keeps_local_vector_references() {
+        let asset = SvgAsset::new(1, 1, r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><defs><path id="shape" d="M1 1h8v8H1z"/></defs><use href="#shape"/></svg>"##).unwrap();
+        let image = SvgRasterizer::default().rasterize(&asset, 10, 10).unwrap();
+        assert!(image.pixels.as_chunks::<4>().0.iter().any(|p| p[3] > 0));
     }
 }
