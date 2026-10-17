@@ -2746,6 +2746,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "touchbar-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "touchbar-scene"
 version = "0.1.0"
 dependencies = [
@@ -2877,6 +2881,10 @@ dependencies = [
  "touchbar-scene",
  "touchbar-ui",
 ]
+
+[[package]]
+name = "touchbard"
+version = "0.1.0"
 
 [[package]]
 name = "tracing"
@@ -3757,6 +3765,7 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "rustix",
  "tempfile",
  "touchbar-core",
  "touchbar-loader",

@@ -68,3 +68,29 @@ jobs:
           name: golden-diff
           path: target/golden-diff/
           if-no-files-found: ignore
+
+  fuzz:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz --locked
+      - name: Fuzz protocol decoders
+        working-directory: fuzz
+        run: |
+          targets=$(cargo +nightly fuzz list)
+          if [ -z "$targets" ]; then
+            echo "Decoder targets are introduced in stage 4 H2; none exist yet."
+          fi
+          for target in $targets; do
+            cargo +nightly fuzz run "$target" -- -max_total_time=600
+          done
+      - name: Upload fuzz crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: protocol-fuzz-crashes
+          path: fuzz/artifacts/

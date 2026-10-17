@@ -118,3 +118,50 @@ fn invalid_command_never_runs_tests() {
     }
     assert_eq!(f.called(), None);
 }
+
+#[test]
+fn hardware_command_is_recognized_and_never_silently_skips() {
+    let f = Fixture::new();
+    let output = f.run(&["test-env", "hardware"]);
+    match output.status.code() {
+        Some(1) => {
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                error.contains("root") || error.contains("05ac:8302"),
+                "{error}"
+            );
+            assert_eq!(f.called(), None);
+        }
+        Some(7) => assert_eq!(
+            f.called().as_deref(),
+            Some("test\n--workspace\n--locked\nenv_hardware_\n--\n--ignored\n--nocapture\n")
+        ),
+        other => panic!("hardware suite was not dispatched or rejected by preflight: {other:?}"),
+    }
+}
+
+#[test]
+fn hardware_preflight_requires_root_and_the_touch_bar_device() {
+    let f = Fixture::new();
+    let usb = f.dir.join("usb");
+    fs::create_dir(&usb).unwrap();
+    assert!(
+        xtask::check_hardware(&usb, 1000)
+            .unwrap_err()
+            .contains("root")
+    );
+    assert!(
+        xtask::check_hardware(&usb, 0)
+            .unwrap_err()
+            .contains("05ac:8302")
+    );
+    let unrelated = usb.join("1-1");
+    fs::create_dir(&unrelated).unwrap();
+    fs::write(unrelated.join("idVendor"), "05ac\n").unwrap();
+    fs::write(unrelated.join("idProduct"), "1234\n").unwrap();
+    assert!(xtask::check_hardware(&usb, 0).is_err());
+    fs::write(unrelated.join("idProduct"), "8302\n").unwrap();
+    assert!(xtask::check_hardware(&usb, 0).is_ok());
+    // Even the correct device does not authorize an unprivileged hardware run.
+    assert!(xtask::check_hardware(&usb, 1000).is_err());
+}

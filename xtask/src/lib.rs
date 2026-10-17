@@ -126,3 +126,23 @@ pub fn build_plugins(root: &Path, output: &Path) -> Result<(), String> {
     )?;
     assemble_plugins(root, output, &modules[0].1)
 }
+
+/// Hardware preflight is read-only; tests inject a sysfs tree and effective UID.
+pub fn check_hardware(usb_devices: &Path, effective_uid: u32) -> Result<(), String> {
+    if effective_uid != 0 {
+        return Err("hardware environment requires root".into());
+    }
+    let entries = fs::read_dir(usb_devices)
+        .map_err(|e| format!("hardware environment requires Touch Bar USB 05ac:8302: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot inspect USB devices: {e}"))?;
+        let vendor = fs::read_to_string(entry.path().join("idVendor"));
+        let product = fs::read_to_string(entry.path().join("idProduct"));
+        if vendor.as_deref().is_ok_and(|v| v.trim() == "05ac")
+            && product.as_deref().is_ok_and(|v| v.trim() == "8302")
+        {
+            return Ok(());
+        }
+    }
+    Err("hardware environment requires Touch Bar USB 05ac:8302".into())
+}

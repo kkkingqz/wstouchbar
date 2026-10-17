@@ -1,0 +1,12 @@
+[package]
+name = "touchbar-protocol-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+[package.metadata]
+cargo-fuzz = true
+[dependencies]
+libfuzzer-sys = "0.4"
+touchbar-protocol = { path = "../crates/touchbar-protocol" }
+[workspace]
+members = ["."]

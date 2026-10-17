@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/touchbar-model", "crates/touchbar-bindings", "crates/touchbar-core", "crates/touchbar-testkit",
+exclude = ["fuzz"]
+members = ["crates/touchbar-protocol", "crates/touchbard", "crates/touchbar-model", "crates/touchbar-bindings", "crates/touchbar-core", "crates/touchbar-testkit",
     "crates/touchbar-logic-types", "crates/touchbar-logic-sdk", "crates/touchbar-logic-runtime",
     "crates/touchbar-sets", "crates/touchbar-wasm-fixtures", "plugins/controls", "tests/logic-fixtures/*",
     "crates/touchbar-ui",
@@ -27,6 +28,8 @@ repository = "https://github.com/kkkingqz/wstouchbar"
 
 [workspace.dependencies]
 anyhow = "1.0"
+touchbar-protocol = { path = "crates/touchbar-protocol" }
+touchbard = { path = "crates/touchbard" }
 touchbar-model = { path = "crates/touchbar-model" }
 touchbar-bindings = { path = "crates/touchbar-bindings" }
 touchbar-core = { path = "crates/touchbar-core" }

@@ -5,6 +5,7 @@ enum Environment {
     Gpu,
     Dbus,
     Pipewire,
+    Hardware,
 }
 impl Environment {
     fn parse(value: &str) -> Option<Self> {
@@ -12,6 +13,7 @@ impl Environment {
             "gpu" => Some(Self::Gpu),
             "dbus" => Some(Self::Dbus),
             "pipewire" => Some(Self::Pipewire),
+            "hardware" => Some(Self::Hardware),
             _ => None,
         }
     }
@@ -20,6 +22,7 @@ impl Environment {
             Self::Gpu => "env_gpu_",
             Self::Dbus => "env_dbus_",
             Self::Pipewire => "env_pipewire_",
+            Self::Hardware => "env_hardware_",
         }
     }
     fn check(self) -> Result<(), String> {
@@ -45,6 +48,10 @@ impl Environment {
                 }
                 Ok(())
             }
+            Self::Hardware => xtask::check_hardware(
+                std::path::Path::new("/sys/bus/usb/devices"),
+                rustix::process::geteuid().as_raw(),
+            ),
             Self::Dbus => check_program("dbus-daemon"),
             Self::Pipewire => {
                 check_program("pipewire")?;
@@ -121,19 +128,19 @@ fn main() -> ExitCode {
     }
     if args.as_slice() == ["--help"] || args.as_slice() == ["-h"] {
         println!(
-            "Usage: cargo xtask test-env gpu|dbus|pipewire; cargo xtask build-plugins [--out DIR]"
+            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware; cargo xtask build-plugins [--out DIR]"
         );
         return ExitCode::SUCCESS;
     }
     let [command, name] = args.as_slice() else {
         eprintln!(
-            "Usage: cargo xtask test-env gpu|dbus|pipewire; cargo xtask build-plugins [--out DIR]"
+            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware; cargo xtask build-plugins [--out DIR]"
         );
         return ExitCode::from(2);
     };
     let Some(environment) = Environment::parse(name).filter(|_| command == "test-env") else {
         eprintln!(
-            "Usage: cargo xtask test-env gpu|dbus|pipewire; cargo xtask build-plugins [--out DIR]"
+            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware; cargo xtask build-plugins [--out DIR]"
         );
         return ExitCode::from(2);
     };
