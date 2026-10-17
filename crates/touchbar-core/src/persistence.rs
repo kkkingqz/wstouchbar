@@ -25,6 +25,18 @@ fn dirty(record: &PersistedState) -> StatePatch {
         .collect()
 }
 impl Core {
+    /// Read unsaved patches without changing timers or replay state. The shell
+    /// flushes these patches before destroying instances at session shutdown.
+    pub fn pending_persist(&self) -> Vec<(PersistKey, StatePatch)> {
+        self.persisted
+            .iter()
+            .filter_map(|record| {
+                let fields = dirty(record);
+                (!fields.is_empty()).then(|| (record.key.clone(), fields))
+            })
+            .collect()
+    }
+
     pub(crate) fn load_persisted(
         &mut self,
         key: &PersistKey,

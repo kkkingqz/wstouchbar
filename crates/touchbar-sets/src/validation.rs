@@ -111,6 +111,47 @@ impl PluginManifest {
                 "duplicate set file",
             )?;
         }
+        let mut ids = BTreeSet::new();
+        let mut files = BTreeSet::new();
+        for (i, profile) in self.profiles.iter().enumerate() {
+            let p = format!("profiles[{i}]");
+            reference(&profile.id, &field(&p, "id"))?;
+            relative(&profile.file, &field(&p, "file"))?;
+            check(
+                ids.insert(&profile.id),
+                &field(&p, "id"),
+                "duplicate profile id",
+            )?;
+            check(
+                files.insert(&profile.file),
+                &field(&p, "file"),
+                "duplicate profile file",
+            )?;
+        }
+        check(self.assets.len() <= 256, "assets", "too many assets")?;
+        let mut ids = BTreeSet::new();
+        let mut pixels = 0u64;
+        for (i, asset) in self.assets.iter().enumerate() {
+            let p = format!("assets[{i}]");
+            reference(&asset.id, &field(&p, "id"))?;
+            relative(&asset.file, &field(&p, "file"))?;
+            check(
+                ids.insert(&asset.id),
+                &field(&p, "id"),
+                "duplicate asset id",
+            )?;
+            pixels += u64::from(asset.width) * u64::from(asset.height);
+            check(
+                asset.width > 0 && asset.height > 0 && asset.width <= 2048 && asset.height <= 2048,
+                &p,
+                "raster dimensions must be 1..=2048 pixels",
+            )?;
+            check(
+                pixels <= 16 * 1024 * 1024,
+                "assets",
+                "asset rasters exceed 16M pixels per plugin",
+            )?;
+        }
         let mut requires = BTreeSet::new();
         for (i, id) in self.requires.iter().enumerate() {
             check(
@@ -123,6 +164,24 @@ impl PluginManifest {
     }
 }
 impl SetFile {
+    pub fn validate_assets(&self, ids: &BTreeSet<&str>) -> Result<()> {
+        let mut check = |node: &LayoutNode, path: &str| {
+            if let Some(asset) = &node.asset {
+                check(
+                    ids.contains(asset.as_str()),
+                    &field(path, "asset"),
+                    "undeclared asset",
+                )?;
+            }
+            Ok(())
+        };
+        self.layout.walk("layout", &mut check)?;
+        for panel in &self.panels {
+            panel.layout.walk("panel", &mut check)?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<()> {
         check(self.version == 1, "version", "unsupported set version")?;
         reference(&self.id, "id")?;
@@ -506,7 +565,7 @@ fn validate_node(
         &field(path, "children"),
         "node does not support these children",
     )?;
-    if node.kind == LayoutKind::Repeat {
+    if matches!(node.kind, LayoutKind::Repeat | LayoutKind::Scrubber) {
         for (n, b) in [
             ("repeat_from", node.repeat_from.is_some()),
             ("repeat_key", node.repeat_key.is_some()),
@@ -515,7 +574,7 @@ fn validate_node(
             check(
                 b,
                 &field(path, n),
-                "repeat requires source, key and template",
+                "repeat or scrubber requires source, key and template",
             )?;
         }
     } else {
@@ -524,7 +583,39 @@ fn validate_node(
             ("repeat_key", node.repeat_key.is_some()),
             ("template", node.template.is_some()),
         ] {
-            check(!b, &field(path, n), "repeat properties require repeat node")?;
+            check(
+                !b,
+                &field(path, n),
+                "repeat properties require repeat or scrubber node",
+            )?;
+        }
+    }
+    if node.kind == LayoutKind::Scrubber {
+        check(
+            node.value.is_none(),
+            &field(path, "value"),
+            "scrubber uses records, not scalar value",
+        )?;
+        check(
+            node.value_from.is_none(),
+            &field(path, "value_from"),
+            "scrubber uses records, not scalar value",
+        )?;
+        if let Some(template) = &node.template {
+            template.walk(&field(path, "template"), &mut |node, path| {
+                check(
+                    !matches!(
+                        node.kind,
+                        LayoutKind::Button
+                            | LayoutKind::Slider
+                            | LayoutKind::Scrubber
+                            | LayoutKind::Key
+                            | LayoutKind::KeyRow
+                    ),
+                    path,
+                    "scrubber template must be visual; interactions belong to scrubber",
+                )
+            })?;
         }
     }
     if let Some(k) = &node.repeat_key {
@@ -705,5 +796,43 @@ fn validate_node(
     if let Some(t) = &node.template {
         validate_node(t, &field(path, "template"), depth + 1, true, budget)?;
     }
+    // D104: Core currently has one rectangle for both hit testing and value
+    // coordinates. Spatial motion would desynchronize these after clipping.
+    if let Some(motion) = &node.motion
+        && contains_interactive(node)
+    {
+        check(
+            spatial_identity(&motion.from) && spatial_identity(&motion.to),
+            &field(path, "motion"),
+            "interactive subtrees support only opacity motion in stage 3",
+        )?;
+    }
     Ok(())
+}
+
+fn contains_interactive(node: &LayoutNode) -> bool {
+    matches!(
+        node.kind,
+        LayoutKind::Button
+            | LayoutKind::Key
+            | LayoutKind::KeyRow
+            | LayoutKind::Slider
+            | LayoutKind::Scrubber
+    ) || node.children.iter().any(contains_interactive)
+        || node.template.as_deref().is_some_and(contains_interactive)
+        || node
+            .variants
+            .iter()
+            .any(|variant| contains_interactive(&variant.layout))
+}
+
+fn spatial_identity(transform: &TransformDefinition) -> bool {
+    [&transform.x, &transform.y, &transform.scale]
+        .into_iter()
+        .zip([0.0, 0.0, 1.0])
+        .all(|(binding, identity)| match binding {
+            None => true,
+            Some(ScalarBinding::Number(value)) => *value == identity,
+            Some(ScalarBinding::State(_)) => false,
+        })
 }

@@ -28,6 +28,52 @@ macro_rules! invalid {
     };
 }
 invalid!(
+    interactive_button_motion_rejected,
+    "[layout]\nkind='button'\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={},to={x=10}}",
+    "layout.motion",
+    "interactive"
+);
+invalid!(
+    interactive_key_motion_rejected,
+    "[layout]\nkind='key'\nkey='f1'\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={scale=2},to={}}",
+    "layout.motion",
+    "interactive"
+);
+invalid!(
+    interactive_slider_motion_rejected,
+    "[layout]\nkind='slider'\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={},to={y=10}}",
+    "layout.motion",
+    "interactive"
+);
+invalid!(
+    interactive_scrubber_motion_rejected,
+    "[layout]\nkind='scrubber'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text',text_from='record.id'}\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={},to={scale=0.5}}",
+    "layout.motion",
+    "interactive"
+);
+invalid!(
+    interactive_parent_motion_rejected,
+    "[layout]\nkind='row'\nchildren=[{kind='button',visible_from='visible'}]\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={},to={x=10}}",
+    "layout.motion",
+    "interactive"
+);
+invalid!(
+    interactive_spatial_binding_rejected_even_if_initially_identity,
+    "[layout]\nkind='button'\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={},to={scale='scale'}}",
+    "layout.motion",
+    "interactive"
+);
+
+#[test]
+fn interactive_opacity_motion_and_decorative_spatial_motion_remain_valid() {
+    parse(
+        "[layout]\nkind='row'\nchildren=[{kind='slider'}]\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={x=0,scale=1,opacity=0},to={opacity='alpha'}}",
+    );
+    parse(
+        "[layout]\nkind='text'\ntext='Moving'\nmotion={id=1,duration_ms=100,easing='linear',playback='once',from={},to={x=10,scale=2}}",
+    );
+}
+invalid!(
     unknown_root,
     "oops=true\n[layout]\nkind='text'",
     "oops",
@@ -108,13 +154,22 @@ invalid!(
 #[test]
 fn selected_handler_checks_declared_action_and_kind() {
     use touchbar_model::{ActionDescription, LogicDescription};
-    let source = set("[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'");
+    let source = set(
+        "[layout]\nkind='scrubber'\nid='picker'\non_selected='choose'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text'}",
+    );
     for kinds in [None, Some(vec![ActionKind::Activated])] {
         let description = LogicDescription {
             actions: kinds
                 .map(|kinds| vec![("choose".into(), ActionDescription { kinds, value: None })])
                 .unwrap_or_default(),
-            state: vec![],
+            state: vec![touchbar_model::StateField {
+                name: "rows".into(),
+                kind: touchbar_model::FieldKind::Records(vec![(
+                    "id".into(),
+                    touchbar_model::ScalarKind::Text,
+                )]),
+                persist: false,
+            }],
         };
         let error =
             SetFile::from_toml_with_description("picker.toml", &source, &description).unwrap_err();
@@ -536,7 +591,6 @@ fn set_file_round_trips_all_layout_kinds() {
         "slider",
         "meter",
         "progress",
-        "scrubber",
         "fixed-space",
         "flexible-space",
     ];
@@ -548,6 +602,7 @@ fn set_file_round_trips_all_layout_kinds() {
         assert_eq!(SetFile::from_toml("roundtrip.toml", &encoded).unwrap(), doc);
     }
     for body in [
+        "[layout]\nkind='scrubber'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text',text_from='record.label'}",
         "[layout]\nkind='repeat'\nrepeat_from='rows'\nrepeat_key='id'\ntemplate={kind='text',text_from='record.label'}",
         "[layout]\nkind='responsive'\nvariants=[{representation='full',minimum_width=10,layout={kind='text'}}]",
         "[layout]\nkind='canvas'\ncanvas_from='drawing'",

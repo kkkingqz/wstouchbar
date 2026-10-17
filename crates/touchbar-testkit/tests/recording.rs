@@ -1,7 +1,6 @@
 use proptest::prelude::*;
 use touchbar_core::*;
 use touchbar_model::*;
-use touchbar_testkit::*;
 
 #[test]
 fn recorder_starts_with_initial_checkpoint_and_replays_early_inputs() {

@@ -1,0 +1,24 @@
+[package]
+name = "touchbar-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+sha2.workspace = true
+serde = { workspace = true, features = ["rc"] }
+serde_json.workspace = true
+cosmic-text.workspace = true
+resvg.workspace = true
+taffy.workspace = true
+naga.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+rustix.workspace = true

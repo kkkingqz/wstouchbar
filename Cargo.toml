@@ -2,6 +2,19 @@
 members = ["crates/touchbar-model", "crates/touchbar-bindings", "crates/touchbar-core", "crates/touchbar-testkit",
     "crates/touchbar-logic-types", "crates/touchbar-logic-sdk", "crates/touchbar-logic-runtime",
     "crates/touchbar-sets", "crates/touchbar-wasm-fixtures", "plugins/controls", "tests/logic-fixtures/*",
+    "crates/touchbar-ui",
+    "crates/touchbar-layout",
+    "crates/touchbar-profiles",
+    "crates/touchbar-scene",
+    "crates/touchbar-gl",
+    "crates/touchbar-loader",
+    "crates/touchbar-desktop",
+    "crates/touchbar-effects",
+    "crates/touchbar-audio",
+    "crates/touchbar-session",
+    "crates/touchbar-control",
+    "crates/touchbarctl",
+    "xtask",
 ]
 resolver = "3"
 
@@ -13,6 +26,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/kkkingqz/wstouchbar"
 
 [workspace.dependencies]
+anyhow = "1.0"
 touchbar-model = { path = "crates/touchbar-model" }
 touchbar-bindings = { path = "crates/touchbar-bindings" }
 touchbar-core = { path = "crates/touchbar-core" }
@@ -33,6 +47,40 @@ wit-component = "0.261.0"
 wit-parser = "0.261.0"
 toml = "1.1.6"
 log = "0.4"
+
+touchbar-ui = { path = "crates/touchbar-ui" }
+touchbar-layout = { path = "crates/touchbar-layout" }
+touchbar-profiles = { path = "crates/touchbar-profiles" }
+touchbar-scene = { path = "crates/touchbar-scene" }
+touchbar-gl = { path = "crates/touchbar-gl" }
+touchbar-loader = { path = "crates/touchbar-loader" }
+touchbar-desktop = { path = "crates/touchbar-desktop" }
+touchbar-effects = { path = "crates/touchbar-effects" }
+touchbar-audio = { path = "crates/touchbar-audio" }
+touchbar-session = { path = "crates/touchbar-session" }
+touchbar-control = { path = "crates/touchbar-control" }
+touchbarctl = { path = "crates/touchbarctl" }
+cosmic-text = "0.19"
+resvg = { version = "0.48.1", default-features = false }
+taffy = { version = "0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox"] }
+naga = { version = "30.0.1", features = ["wgsl-in", "glsl-out"] }
+glow = "0.16"
+khronos-egl = { version = "6.0", features = ["dynamic"] }
+png = "0.18"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+pipewire = { version = "0.10.1", features = ["v0_3_65"] }
+zbus = "5.19.0"
+rustix = { version = "1.1", features = ["process", "fs", "net", "event"] }
+async-io = "2.6"
+futures-lite = "2.6"
+async-channel = "2.5"
+inotify = "0.11.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-journald = "0.3.2"
+sha2 = "0.10"
+serde_path_to_error = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

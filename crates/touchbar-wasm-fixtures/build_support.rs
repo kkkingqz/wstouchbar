@@ -1,4 +1,4 @@
-//! Shared component build support; reusable by the future xtask.
+//! Component build support shared by the fixture build script and xtask.
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -20,6 +20,14 @@ pub const MODULES: &[(&str, &str)] = &[
 ];
 
 pub fn build(root: &Path, output: &Path) -> Result<Vec<(&'static str, PathBuf)>, String> {
+    build_selected(root, output, MODULES)
+}
+
+pub fn build_selected(
+    root: &Path,
+    output: &Path,
+    modules: &[(&'static str, &str)],
+) -> Result<Vec<(&'static str, PathBuf)>, String> {
     let target = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"))
@@ -36,7 +44,7 @@ pub fn build(root: &Path, output: &Path) -> Result<Vec<(&'static str, PathBuf)>,
             "--target-dir",
         ])
         .arg(&target);
-    for (_, package) in MODULES {
+    for (_, package) in modules {
         cargo.args(["-p", package]);
     }
     for (name, _) in env::vars_os() {
@@ -66,7 +74,7 @@ pub fn build(root: &Path, output: &Path) -> Result<Vec<(&'static str, PathBuf)>,
         ));
     }
     let raw_dir = target.join("wasm32-unknown-unknown/release");
-    MODULES
+    modules
         .iter()
         .map(|(name, package)| {
             let raw = fs::read(raw_dir.join(format!("{}.wasm", package.replace('-', "_"))))

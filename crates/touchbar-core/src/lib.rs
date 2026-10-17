@@ -11,6 +11,8 @@ mod instances;
 mod keys;
 mod layers;
 mod persistence;
+mod recording;
+pub use recording::*;
 mod presentations;
 mod profiles;
 use presentations::Presentation;
@@ -141,6 +143,34 @@ impl Core {
             keys: KeyTracker::default(),
             desktop: DesktopCapabilities::default(),
         }
+    }
+    /// Pure admission gate, shared with Input::Catalog. Profile conflicts are diagnostic.
+    pub fn check_catalog(&self, catalog: &Catalog) -> Result<(), Vec<CatalogIssue>> {
+        let issues: Vec<_> = self
+            .catalog_issues(catalog)
+            .into_iter()
+            .filter(|i| i.code != CatalogIssueCode::ProfileConflict)
+            .collect();
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(issues)
+        }
+    }
+    fn catalog_issues(&self, catalog: &Catalog) -> Vec<CatalogIssue> {
+        let mut issues = catalog.validate();
+        for set in &catalog.sets {
+            if touchbar_logic_types::wire_size_init(&set.logic_config, &vec![])
+                > self.config.max_update_bytes
+            {
+                issues.push(CatalogIssue {
+                    code: CatalogIssueCode::InvalidWidget,
+                    location: set.reference.to_string(),
+                    detail: "configuration exceeds Init budget".into(),
+                });
+            }
+        }
+        issues
     }
     pub fn snapshot(&self) -> CoreSnapshot {
         let requests: Vec<_> = self
@@ -509,28 +539,17 @@ impl Core {
                 self.resolve_surfaces(&mut output);
             }
             Input::Catalog(catalog) => {
-                let issues = catalog.validate();
-                let mut invalid = issues
+                let issues = self.catalog_issues(&catalog);
+                let admitted = issues
                     .iter()
-                    .any(|i| i.code != CatalogIssueCode::ProfileConflict);
+                    .all(|i| i.code == CatalogIssueCode::ProfileConflict);
                 for issue in issues {
                     warn(
                         &mut output,
                         &format!("{}: {}", issue.location, issue.detail),
                     );
                 }
-                for set in &catalog.sets {
-                    if touchbar_logic_types::wire_size_init(&set.logic_config, &vec![])
-                        > self.config.max_update_bytes
-                    {
-                        warn(
-                            &mut output,
-                            &format!("{}: configuration exceeds Init budget", set.reference),
-                        );
-                        invalid = true;
-                    }
-                }
-                if !invalid {
+                if admitted {
                     let changed = self.catalog.bindings != catalog.bindings;
                     self.catalog = catalog;
                     if changed {

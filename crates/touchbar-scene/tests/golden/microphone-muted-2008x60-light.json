@@ -1,0 +1,183 @@
+{
+  "clear": {
+    "alpha": 1.0,
+    "blue": 0.9700000286102295,
+    "green": 0.9599999785423279,
+    "red": 0.9599999785423279
+  },
+  "commands": [
+    {
+      "kind": "push_clip",
+      "rect": {
+        "height": 60.0,
+        "width": 160.0,
+        "x": 0.0,
+        "y": 0.0
+      }
+    },
+    {
+      "color": {
+        "alpha": 1.0,
+        "blue": 0.8899999856948853,
+        "green": 0.8700000047683716,
+        "red": 0.8700000047683716
+      },
+      "kind": "rounded_rect",
+      "radius": 9.0,
+      "rect": {
+        "height": 60.0,
+        "width": 160.0,
+        "x": 0.0,
+        "y": 0.0
+      }
+    },
+    {
+      "kind": "push_clip",
+      "rect": {
+        "height": 44.0,
+        "width": 144.0,
+        "x": 8.0,
+        "y": 8.0
+      }
+    },
+    {
+      "coloring": {
+        "Mask": {
+          "alpha": 1.0,
+          "blue": 0.10000000149011612,
+          "green": 0.07999999821186066,
+          "red": 0.07999999821186066
+        }
+      },
+      "kind": "image",
+      "opacity": 1.0,
+      "rect": {
+        "height": 28.0,
+        "width": 28.0,
+        "x": 11.0,
+        "y": 16.0
+      },
+      "resource": "417897d98442c280e12ce53275c5287325a4de5e21cde58aa93541ec311d751b"
+    },
+    {
+      "kind": "push_clip",
+      "rect": {
+        "height": 38.0,
+        "width": 106.0,
+        "x": 43.0,
+        "y": 11.0
+      }
+    },
+    {
+      "kind": "push_clip",
+      "rect": {
+        "height": 38.0,
+        "width": 106.0,
+        "x": 43.0,
+        "y": 11.0
+      }
+    },
+    {
+      "coloring": {
+        "Mask": {
+          "alpha": 1.0,
+          "blue": 0.10000000149011612,
+          "green": 0.07999999821186066,
+          "red": 0.07999999821186066
+        }
+      },
+      "kind": "image",
+      "opacity": 1.0,
+      "rect": {
+        "height": 38.0,
+        "width": 106.0,
+        "x": 43.0,
+        "y": 11.0
+      },
+      "resource": "df9e3654d5194c95bbc2633250e051605dc55967fb390547be67a74a2f0e5be1"
+    },
+    {
+      "kind": "pop_clip"
+    },
+    {
+      "kind": "pop_clip"
+    },
+    {
+      "kind": "pop_clip"
+    },
+    {
+      "kind": "pop_clip"
+    }
+  ],
+  "layout": {
+    "hit_map": [
+      {
+        "instance": {
+          "generation": 1,
+          "number": 1
+        },
+        "plane": "Profile",
+        "record_key": null,
+        "rect": {
+          "height": 60.0,
+          "width": 160.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "widget": "microphone-toggle"
+      }
+    ],
+    "named_slots": [
+      {
+        "bounds": {
+          "height": 60.0,
+          "width": 160.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "instance": {
+          "generation": 1,
+          "number": 1
+        },
+        "slot": "slot"
+      }
+    ],
+    "presentation": null,
+    "representations": [
+      [
+        {
+          "generation": 1,
+          "number": 1
+        },
+        ""
+      ]
+    ],
+    "scrubbers": [],
+    "slots": [
+      {
+        "instance": {
+          "generation": 1,
+          "number": 1
+        },
+        "rect": {
+          "height": 60.0,
+          "width": 160.0,
+          "x": 0.0,
+          "y": 0.0
+        }
+      }
+    ]
+  },
+  "resources": {
+    "417897d98442c280e12ce53275c5287325a4de5e21cde58aa93541ec311d751b": {
+      "height": 32,
+      "kind": "raster",
+      "width": 32
+    },
+    "df9e3654d5194c95bbc2633250e051605dc55967fb390547be67a74a2f0e5be1": {
+      "height": 38,
+      "kind": "raster",
+      "width": 106
+    }
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "clear": {
+    "alpha": 1.0,
+    "blue": 0.9700000286102295,
+    "green": 0.9599999785423279,
+    "red": 0.9599999785423279
+  },
+  "commands": [
+    {
+      "color": {
+        "alpha": 1.0,
+        "blue": 0.8899999856948853,
+        "green": 0.8700000047683716,
+        "red": 0.8700000047683716
+      },
+      "kind": "rounded_rect",
+      "radius": 9.0,
+      "rect": {
+        "height": 52.0,
+        "width": 152.0,
+        "x": 4.0,
+        "y": 4.0
+      }
+    },
+    {
+      "kind": "push_clip",
+      "rect": {
+        "height": 60.0,
+        "width": 160.0,
+        "x": 0.0,
+        "y": 0.0
+      }
+    },
+    {
+      "coloring": {
+        "Mask": {
+          "alpha": 1.0,
+          "blue": 0.25,
+          "green": 0.25,
+          "red": 0.949999988079071
+        }
+      },
+      "kind": "image",
+      "opacity": 1.0,
+      "rect": {
+        "height": 60.0,
+        "width": 160.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "resource": "c621b18d0b10cc93931a2482a736eb19d3d426cc0d272988a496f0b797d7f2c0"
+    },
+    {
+      "kind": "pop_clip"
+    }
+  ],
+  "layout": {
+    "hit_map": [],
+    "named_slots": [
+      {
+        "bounds": {
+          "height": 60.0,
+          "width": 160.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "instance": {
+          "generation": 1,
+          "number": 1
+        },
+        "slot": "slot"
+      }
+    ],
+    "presentation": null,
+    "representations": [],
+    "scrubbers": [],
+    "slots": [
+      {
+        "instance": {
+          "generation": 1,
+          "number": 1
+        },
+        "rect": {
+          "height": 60.0,
+          "width": 160.0,
+          "x": 0.0,
+          "y": 0.0
+        }
+      }
+    ]
+  },
+  "resources": {
+    "c621b18d0b10cc93931a2482a736eb19d3d426cc0d272988a496f0b797d7f2c0": {
+      "height": 60,
+      "kind": "raster",
+      "width": 160
+    }
+  }
+}

@@ -1,6 +1,5 @@
 use touchbar_core::*;
 use touchbar_model::*;
-use touchbar_testkit::*;
 #[test]
 fn rejected_nonfinite_input_remains_replayable() {
     let mut core = Core::new(CoreConfig::default());

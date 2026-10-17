@@ -70,7 +70,7 @@ fn join(parent: &str, child: &str) -> String {
         format!("{parent}.{child}")
     }
 }
-pub(crate) fn error(path: &str, message: impl Into<String>) -> DocumentError {
+pub fn error(path: &str, message: impl Into<String>) -> DocumentError {
     DocumentError {
         file: "set".into(),
         path: path.into(),
@@ -94,7 +94,7 @@ fn line(source: &str, offset: usize) -> usize {
         .filter(|&&b| b == b'\n')
         .count()
 }
-pub(crate) fn parse<T: DeserializeOwned>(
+pub fn parse<T: DeserializeOwned>(
     file: &Path,
     source: &str,
     validate: impl FnOnce(&T) -> Result<(), DocumentError>,
@@ -126,12 +126,14 @@ pub(crate) fn parse<T: DeserializeOwned>(
             path = "$".into();
         }
         let message = e.inner().to_string();
-        for prefix in ["missing field `"] {
+        for prefix in ["missing field `", "unknown field `"] {
             if let Some(field) = message
                 .strip_prefix(prefix)
                 .and_then(|s| s.split('`').next())
             {
-                path = join(&path, field);
+                if path != field && !path.ends_with(&format!(".{field}")) {
+                    path = join(&path, field);
+                }
                 break;
             }
         }
@@ -162,4 +164,12 @@ impl SetFile {
             set.validate_bindings(description)
         })
     }
+}
+
+pub(crate) fn locate_error(file: &Path, source: &str, error: DocumentError) -> DocumentError {
+    let mut index = SourceIndex::default();
+    if let Ok(table) = DeTable::parse(source) {
+        let _ = index.table(table.get_ref(), "$", 0);
+    }
+    decorate(error, file, source, &index)
 }

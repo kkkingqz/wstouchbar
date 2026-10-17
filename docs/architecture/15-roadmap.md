@@ -20,7 +20,7 @@
 
 Этап 2: [план](../plans/stage-2-logic.md), [приёмка](../validation/stage-2.md).
 
-Этап 3: [план](../plans/stage-3-session.md).
+Этап 3: [план](../plans/stage-3-session.md), [приёмка](../validation/stage-3.md), [исправления ревью](../plans/stage-3-review-fixes.md).
 
 ## Паритет v1
 

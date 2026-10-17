@@ -1,0 +1,4 @@
+[[binding]]
+id = "fn-layer"
+trigger = { key = "fn", gesture = "while-held" }
+action = { layer = "system/fkeys" }

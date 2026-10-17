@@ -11,6 +11,8 @@ workspace = true
 
 [dependencies]
 touchbar-model.workspace = true
+touchbar-sets.workspace = true
+toml.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

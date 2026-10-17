@@ -1,0 +1,21 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+wit-component.workspace = true
+tempfile = "3"
+
+[dev-dependencies]
+touchbar-wasm-fixtures.workspace = true
+touchbar-loader.workspace = true
+touchbar-logic-runtime.workspace = true
+touchbar-core.workspace = true
+touchbar-model.workspace = true

@@ -212,7 +212,8 @@ fn cache_configuration_is_applied_and_invalid_paths_are_rejected() {
         Box::<MemoryStore>::default(),
     );
     assert!(bad.is_err(), "relative cache path must be rejected");
-    let root = std::env::temp_dir().join(format!("wstouchbar-l6-cache-{}", std::process::id()));
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("cache");
     let mut r = Runtime::new(
         RuntimeConfig {
             cache_dir: Some(root.clone()),
@@ -228,7 +229,10 @@ fn cache_configuration_is_applied_and_invalid_paths_are_rejected() {
         "compiled component must populate cache"
     );
     drop(r);
-    std::fs::remove_dir_all(root).unwrap();
+    // Wasmtime's detached worker may still finish queued statistics writes.
+    // Retire its absolute path before deleting the stable, renamed tree.
+    std::fs::rename(root, directory.path().join("retired")).unwrap();
+    directory.close().unwrap();
 }
 
 #[test]
@@ -305,4 +309,29 @@ fn module_retention_evicts_old_records_without_disposing_live_instances() {
     load(&mut r, "failed", fixtures::ECHO);
     create(&mut r, 3, "failed");
     init(&mut r, 3);
+}
+
+#[test]
+fn loader_describe_shares_create_cache_and_keeps_guest_state_fresh() {
+    let mut r = runtime();
+    load(&mut r, "loader", fixtures::ECHO);
+    let description = r.describe(&plugin(), "loader").unwrap();
+    assert_eq!(
+        r.take_logs()
+            .iter()
+            .filter(|l| l.message == "echo.describe")
+            .count(),
+        1
+    );
+    assert_eq!(r.describe(&plugin(), "loader").unwrap(), description);
+    match r.create(Timestamp(0), id(90), &plugin(), "loader", &set(), &key()) {
+        Input::LogicDescribed {
+            description: actual,
+            ..
+        } => assert_eq!(actual, description),
+        other => panic!("{other:?}"),
+    }
+    assert!(r.take_logs().is_empty());
+    init(&mut r, 90);
+    assert!(r.describe(&plugin(), "missing").is_err());
 }

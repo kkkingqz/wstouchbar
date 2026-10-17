@@ -18,4 +18,4 @@ proptest.workspace = true
 touchbar-logic-runtime.workspace = true
 touchbar-sets.workspace = true
 touchbar-wasm-fixtures.workspace = true
-sha2 = "0.10"
+touchbar-loader.workspace = true

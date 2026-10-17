@@ -1,0 +1,28 @@
+[package]
+name = "touchbar-scene"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+touchbar-model.workspace = true
+touchbar-core.workspace = true
+touchbar-sets.workspace = true
+touchbar-profiles.workspace = true
+touchbar-ui.workspace = true
+touchbar-layout.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+touchbar-wasm-fixtures.workspace = true
+touchbar-testkit = { path = "../touchbar-testkit" }
+cosmic-text.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

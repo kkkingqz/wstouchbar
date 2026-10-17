@@ -27,7 +27,7 @@ assert_eq!(replay.core.snapshot(), harness.snapshot());
 
 `FakeEffects` завершает запрос через `delay_ms` с заданным `result`; `with_handler` задаёт задержку и результат по конкретному эффекту. `timer.after` использует собственную длительность. Отмена убирает будущее завершение. Интервальные подписки выдают `Tick`; прочие данные доставляются через `subscription_after`. Отписка и потеря источника прекращают его будущие сообщения.
 
-`FakeRenderer` располагает виджеты слева направо и возвращает `Layout`, затем `FrameDone`. Ширина задаётся через `renderer.width`, иначе используется ширина виджета или 80 пикселей. Рендер поддерживает слои, панели и геометрию scrubber; сложная настоящая раскладка остаётся в этапе рендера.
+`FakeRenderer` располагает виджеты слева направо и возвращает `Layout`, затем `FrameDone`. Ширина задаётся через `renderer.width`, иначе используется ширина виджета или 80 пикселей. Рендер поддерживает слои, панели и геометрию scrubber; для настоящей раскладки `Harness::with_renderer` принимает реализацию FrameRenderer. В `touchbar-scene/tests/controls_geometry.rs` все сценарии L12 используют SceneRenderer и актуальную геометрию.
 
 `catalog().plugin(...).set(...).profile(...).build()` строит проверяемый каталог в коде. Для нестандартных случаев доступны `SetBuilder::spec` и `ProfileBuilder::spec`.
 
@@ -137,3 +137,51 @@ cargo run -p touchbar-logic-runtime --example controls_benchmark --release --loc
 controls_properties использует те же GeneratedScenario/GeneratedStep, что этап 1, с настоящим модулем и поддельными эффектами. Runtime переиспользуется между случаями для кеша компиляции; все гостевые экземпляры уничтожаются при удалении поверхностей. Тест отдельно требует успешной инициализации controls, проверяет долю Panel/Pending/Faulted и JSON replay. Смена ревизии на несовместимый hang и действия через совместимый trap проверяют fault paths.
 
 В длинном CI обе переменные заданы явно: PROPTEST_CASES=100000, PROPTEST_CONTROLS_CASES=10000. Они независимы, поэтому можно увеличить число быстрых свойств без случайного увеличения дорогого controls-прогона. Замеры и результаты — [приёмка этапа 2](validation/stage-2.md).
+
+## Stage three environment tests
+
+Native workspace builds require `libpipewire-0.3-dev`, `clang`, and `pkg-config` in addition to the Rust toolchain and build tools. EGL is loaded dynamically; ordinary tests do not need a GPU or running services.
+
+```sh
+cargo xtask test-env gpu
+cargo xtask test-env dbus
+cargo xtask test-env pipewire
+```
+
+Ignored environment tests use name prefixes `env_gpu_`, `env_dbus_`, and `env_pipewire_`. The commands validate prerequisites and run only the corresponding ignored tests with `--locked`; failures propagate as a nonzero exit status. GPU preflight inspects EGL/GLES runtime libraries through `ldconfig` on PATH, then tests check actual context creation; Mesa tests select software rendering. D-Bus tests require `dbus-daemon`, PipeWire tests require `pipewire` and `wireplumber`; each suite owns private services rather than using the user's session. The rendering and service tests are added in S6, S9, and S10; S1 installs their runner.
+
+Deterministic rendering fixtures load `assets/fonts/test/InterVariable.ttf`, with its pinned source and OFL license beside it, instead of system fonts. Golden PNG differences are written under `target/golden-diff/` and retained by the render CI job.
+
+## Эталоны кадров
+
+S5 сравнивает точные списки команд/ключи растров и карты попаданий: 54 комбинации девяти случаев, трёх размеров и двух тем. S6 использует те же функции подготовки кадров и сравнивает PNG на Mesa. Обновление выполняется явно:
+
+```sh
+UPDATE_GOLDEN=1 cargo test -p touchbar-scene --test goldens
+UPDATE_GOLDEN=1 cargo xtask test-env gpu
+```
+
+Обычный `cargo test` не требует EGL. `cargo xtask test-env gpu` запускает только ignored-тесты env_gpu_ с программной Mesa и surfaceless. Они проверяют все PNG, примитивы/маски/шейдеры, поворот, damage ≤8, отсутствие отправки неизменённых кадров, независимые поверхности и время жизни EGL display. PNG допускают разницу канала до 2; не более 0,1% пикселей могут превысить её. При расхождении actual и непрозрачный красный diff сохраняются в target/golden-diff.
+
+## Этап 3: сессия и окружения
+
+```sh
+cargo xtask build-plugins
+cargo test -p touchbar-session --locked
+cargo xtask test-env gpu
+cargo xtask test-env dbus
+cargo xtask test-env pipewire
+# Дополнительно: транспорт окон в приватном Weston headless.
+cargo test -p touchbar-session --test simulator_private -- --ignored --nocapture
+```
+
+Обычные сквозные тесты используют настоящие wasm, загрузчик, SceneRenderer и FsStore; GPU не требуется. GPU-прогон повторяет сценарии с пиксельными поверхностями через GL сессии. JSON/PNG-эталоны находятся в `crates/touchbar-session/tests/golden`. Обновление явное: `UPDATE_GOLDEN=1`; после него обязателен отдельный прогон без флага. Подробнее — [тестирование](architecture/13-testing.md).
+
+Информационные замеры, без порогов задержки:
+
+```sh
+cargo run -p touchbar-session --example session_benchmark --release --locked
+cargo run -p touchbar-session --example session_benchmark --release --locked -- --render-node /dev/dri/renderD128
+```
+
+Пример использует временное дерево и поддельные эффекты; реальные громкость и микрофон не меняет. Он измеряет загрузку каталога с холодным и тёплым дисковым кешем, построение полного кадра через смену темы и обновление одного экземпляра, GL с полным damage и RSS собственного процесса. `fixture_first_frame_ms` включает подготовку временного дерева и шрифтов; это не время запуска бинарника сессии. Окружение и отдельные замеры нативного запуска фиксируются в [приёмке этапа 3](validation/stage-3.md).

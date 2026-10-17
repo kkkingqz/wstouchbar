@@ -1,0 +1,18 @@
+version = 1
+id = "default"
+default = true
+
+[[element]]
+kind = "group"
+id = "controls"
+layout = "equal-width"
+spacing = 13
+element = [
+  { kind = "slot", id = "volume", items = ["controls/volume"] },
+  { kind = "slot", id = "brightness", items = ["controls/brightness"] },
+]
+
+[[element]]
+kind = "slot"
+id = "microphone"
+items = ["controls/microphone"]

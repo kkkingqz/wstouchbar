@@ -1,5 +1,4 @@
 use crate::*;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use touchbar_model::*;
 use touchbar_sets::{PluginManifest, SetFile};
@@ -11,15 +10,6 @@ pub struct LoadedPlugin {
     pub revision: String,
     pub component: Option<Vec<u8>>,
     pub(crate) sources: Vec<(PathBuf, String)>,
-}
-fn read(path: &Path) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-fn hash_file(hash: &mut Sha256, name: &str, bytes: &[u8]) {
-    hash.update((name.len() as u64).to_le_bytes());
-    hash.update(name.as_bytes());
-    hash.update((bytes.len() as u64).to_le_bytes());
-    hash.update(bytes);
 }
 fn fixture(id: &str) -> Option<&'static str> {
     use touchbar_wasm_fixtures::*;
@@ -41,49 +31,32 @@ fn fixture(id: &str) -> Option<&'static str> {
 /// Load TOML and the component bytes used by tests. Profiles are supplied by the scenario.
 pub fn plugin_dir(path: impl AsRef<Path>) -> Result<LoadedPlugin, String> {
     let path = path.as_ref();
-    let source = read(&path.join("plugin.toml"))?;
-    let manifest =
-        PluginManifest::from_toml(path.join("plugin.toml"), &source).map_err(|e| e.to_string())?;
-    let mut hash = Sha256::new();
-    hash_file(&mut hash, "plugin.toml", source.as_bytes());
-    let component = if let Some(logic) = &manifest.logic {
-        let file = path.join(logic);
-        let bytes = match std::fs::read(&file) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let source = fixture(manifest.id.as_str()).ok_or_else(|| {
-                    format!("{}: no fixture for plugin {}", file.display(), manifest.id)
-                })?;
-                std::fs::read(source).map_err(|e| format!("{source}: {e}"))?
-            }
-            Err(e) => return Err(format!("{}: {e}", file.display())),
-        };
-        hash_file(&mut hash, logic, &bytes);
-        Some(bytes)
+    let manifest_source = touchbar_loader::read_text(&path.join("plugin.toml"))?;
+    let manifest = PluginManifest::from_toml(path.join("plugin.toml"), &manifest_source)
+        .map_err(|e| e.to_string())?;
+    let fallback = if manifest
+        .logic
+        .as_ref()
+        .is_some_and(|file| !path.join(file).exists())
+    {
+        fixture(manifest.id.as_str())
+            .map(|file| {
+                touchbar_loader::read_bounded(Path::new(file), touchbar_loader::MAX_COMPONENT_BYTES)
+            })
+            .transpose()?
     } else {
         None
     };
-    let mut sets = vec![];
-    let mut sources = vec![];
-    let mut specs = vec![];
-    for entry in &manifest.sets {
-        let file = path.join(&entry.file);
-        let source = read(&file)?;
-        hash_file(&mut hash, &entry.file, source.as_bytes());
-        let set = SetFile::from_toml(&file, &source).map_err(|e| e.to_string())?;
-        if set.id != entry.id {
-            return Err(format!(
-                "{}: set id {} does not match manifest {}",
-                file.display(),
-                set.id,
-                entry.id
-            ));
-        }
-        specs.push(set.to_spec(&manifest).map_err(|e| e.to_string())?);
-        sets.push(set);
-        sources.push((file, source));
-    }
-    let revision = format!("{:x}", hash.finalize());
+    let files = touchbar_loader::read_plugin(path, fallback.as_deref())?;
+    let specs = files
+        .sets
+        .iter()
+        .map(|set| set.to_spec(&files.manifest).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let revision = files.revision;
+    let component = files.component;
+    let sets = files.sets;
+    let sources = files.sources;
     let catalog = Catalog {
         plugins: vec![PluginSpec {
             id: manifest.id.clone(),
