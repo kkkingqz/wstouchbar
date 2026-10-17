@@ -2,8 +2,8 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::BTreeSet, path::Path};
 use touchbar_model::{
-    Binding, BindingIssue, KeyGesture, KeyTrigger, LayerAction, LayerOperation, LayerSurfaces,
-    SetRef, SurfaceName, Trigger, WatchKey, validate_bindings,
+    Binding, BindingIssue, Condition, FactValue, KeyGesture, KeyTrigger, LayerAction,
+    LayerOperation, LayerSurfaces, SetRef, SurfaceName, Trigger, WatchKey, validate_bindings,
 };
 use touchbar_sets::{
     DocumentError,
@@ -13,6 +13,63 @@ use touchbar_sets::{
 pub trait ActionDocument: Clone + DeserializeOwned {
     type Action: Clone + PartialEq;
     fn to_action(&self) -> Result<Self::Action, String>;
+    fn validate_when(_condition: &Condition) -> Result<(), String> {
+        Ok(())
+    }
+}
+/// Daemon recovery actions share the trigger grammar but have a closed fact namespace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecoveryAction {
+    Native,
+    Display,
+    ToggleRecovery,
+}
+impl ActionDocument for RecoveryAction {
+    type Action = Self;
+    fn to_action(&self) -> Result<Self, String> {
+        Ok(*self)
+    }
+    fn validate_when(condition: &Condition) -> Result<(), String> {
+        fn name(name: &str) -> Result<(), String> {
+            if matches!(name, "mode" | "recovery") {
+                Ok(())
+            } else {
+                Err(format!(
+                    "daemon when supports only mode and recovery, found {name}"
+                ))
+            }
+        }
+        fn value(name_: &str, v: &FactValue) -> Result<(), String> {
+            name(name_)?;
+            match (name_, v) {
+                ("mode", FactValue::Text(mode))
+                    if matches!(mode.as_str(), "native" | "display") =>
+                {
+                    Ok(())
+                }
+                ("recovery", FactValue::Boolean(_)) => Ok(()),
+                _ => Err("mode requires native/display text; recovery requires a boolean".into()),
+            }
+        }
+        match condition {
+            Condition::Eq { name, value: v } => value(name.0.as_str(), v),
+            Condition::In { name, values } => {
+                for v in values {
+                    value(name.0.as_str(), v)?;
+                }
+                Ok(())
+            }
+            Condition::Exists(n) => name(n.0.as_str()),
+            Condition::Not(c) => Self::validate_when(c),
+            Condition::All(cs) | Condition::Any(cs) => {
+                for c in cs {
+                    Self::validate_when(c)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, bound(deserialize = "A: Deserialize<'de>"))]
@@ -231,6 +288,9 @@ impl<A: ActionDocument> BindingFile<A> {
                 .as_ref()
                 .map(|w| w.to_condition(&format!("{p}.when")))
                 .transpose()?;
+            if let Some(condition) = &when {
+                A::validate_when(condition).map_err(|e| error(&format!("{p}.when"), e))?;
+            }
             positions.push(i);
             bindings.push(Binding {
                 id: entry.id.clone(),

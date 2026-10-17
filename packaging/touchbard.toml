@@ -1,0 +1,13 @@
+# Distribution defaults; /etc/touchbar/touchbard.toml overrides fields and bindings by id.
+session-grace-ms = 2000
+log = "info"
+# dim-timeout and idle-timeout are seconds; omit to use hid_appletb_kbd parameters.
+# idle-timeout is the additional interval after dimming. Zero means immediate.
+[backlight]
+active = 2
+dimmed = 1
+
+[[binding]]
+id = "recovery"
+trigger = { key = "fn", gesture = "hold", ms = 8000 }
+action = "toggle-recovery"

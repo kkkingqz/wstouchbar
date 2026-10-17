@@ -2893,6 +2893,14 @@ dependencies = [
 [[package]]
 name = "touchbard"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "touchbar-bindings",
+ "touchbar-model",
+ "touchbar-sets",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "tracing"
