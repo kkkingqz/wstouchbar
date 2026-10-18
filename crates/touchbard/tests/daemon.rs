@@ -1093,3 +1093,21 @@ fn lost_acquired_inhibitor_retries_after_logind_reconnect_and_ignores_old_failur
             .any(|c| matches!(c, Command::AcquireInhibitor { .. }))
     );
 }
+
+#[test]
+fn zero_frame_is_rejected_before_the_drm_presenter() {
+    let mut daemon = displaying();
+    let commands = daemon.handle(
+        Timestamp(2100),
+        Event::Message {
+            connection: 1,
+            message: SessionMessage::FrameReady { index: 0, frame: 0 },
+        },
+    );
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c, Command::Present { .. }))
+    );
+    assert_eq!(daemon.owner(), None);
+}

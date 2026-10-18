@@ -846,7 +846,8 @@ impl Daemon {
             }
             SessionMessage::FrameReady { index, frame } => {
                 let c = self.clients.get_mut(&id).expect("owner");
-                if !c.display
+                if frame == 0
+                    || !c.display
                     || !c.input_enabled
                     || !matches!(self.mode.state(), mode::State::Display { .. })
                     || c.info.is_none_or(|i| {

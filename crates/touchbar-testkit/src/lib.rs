@@ -27,3 +27,6 @@ mod module_tester;
 pub use module_tester::*;
 mod plugin;
 pub use plugin::*;
+
+mod touchbard;
+pub use touchbard::*;

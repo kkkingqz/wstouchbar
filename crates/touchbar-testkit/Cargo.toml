@@ -10,6 +10,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+touchbar-protocol.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+rustix.workspace = true
 touchbar-model.workspace = true
 touchbar-core.workspace = true
 serde.workspace = true
@@ -19,3 +23,6 @@ touchbar-logic-runtime.workspace = true
 touchbar-sets.workspace = true
 touchbar-wasm-fixtures.workspace = true
 touchbar-loader.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
