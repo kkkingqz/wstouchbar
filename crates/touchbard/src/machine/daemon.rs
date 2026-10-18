@@ -94,6 +94,23 @@ impl Daemon {
         let _ = d.bindings.set_facts(now, d.facts());
         Ok(d)
     }
+    pub fn session(&self) -> Option<&Session> {
+        self.session.as_ref()
+    }
+    pub fn bridge_active(&self) -> bool {
+        self.bridge.active()
+    }
+    pub fn mode_reason(&self) -> ModeReason {
+        self.reason()
+    }
+    pub fn watch_keys(&self) -> BTreeSet<WatchKey> {
+        let mut keys = self.bindings.watch_keys();
+        keys.insert(WatchKey::Fn);
+        if let Some(c) = self.owner.and_then(|id| self.clients.get(&id)) {
+            keys.extend(c.watched.iter().copied());
+        }
+        keys
+    }
     pub fn inhibitor_error(&self) -> Option<&str> {
         self.inhibitor_error.as_deref()
     }

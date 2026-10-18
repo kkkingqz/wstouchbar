@@ -16,6 +16,8 @@ cast_sign_loss = "warn"
 match_same_arms = "warn"
 
 [dependencies]
+tracing.workspace = true
+tracing-journald.workspace = true
 zbus.workspace = true
 drm.workspace = true
 drm-ffi.workspace = true

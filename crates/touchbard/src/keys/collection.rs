@@ -170,6 +170,10 @@ impl KeyInputs {
             faults: std::mem::take(&mut self.faults),
         }
     }
+    pub fn refresh(&mut self) -> InputBatch {
+        let batch = self.reader.refresh();
+        self.convert(batch)
+    }
     pub async fn next(&mut self) -> io::Result<InputBatch> {
         let mut batch = self.reader.next().await?;
         if batch.rescan {

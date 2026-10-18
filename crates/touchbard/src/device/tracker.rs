@@ -100,7 +100,9 @@ impl Tracker {
         }
     }
     pub fn rescan(&mut self) -> io::Result<Vec<Change>> {
-        let snapshot = discover(&self.roots)?;
+        self.update(discover(&self.roots)?)
+    }
+    pub(crate) fn update(&mut self, snapshot: Option<super::Snapshot>) -> io::Result<Vec<Change>> {
         let mut changes = Vec::new();
         let changed = self.current.as_ref().map(|(_, d)| d) != snapshot.as_ref().map(|s| &s.device);
         if changed || !self.scanned {

@@ -21,3 +21,5 @@ pub mod keys;
 pub mod backlight;
 
 pub mod logind;
+
+pub mod runtime;

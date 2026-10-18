@@ -2974,6 +2974,8 @@ dependencies = [
  "touchbar-model",
  "touchbar-protocol",
  "touchbar-sets",
+ "tracing",
+ "tracing-journald",
  "tracing-subscriber",
  "zbus",
 ]

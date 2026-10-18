@@ -163,3 +163,41 @@ fn dropping_worker_never_runs_queued_operations_after_an_active_one() {
     finished.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 0);
 }
+
+// Cancelling mode work must never lose or reorder ownership/persistence operations.
+#[test]
+fn committed_jobs_and_replies_survive_generation_changes_in_fifo_order() {
+    futures_lite::future::block_on(async {
+        let barrier = Arc::new(Barrier::new(2));
+        let work = barrier.clone();
+        let (tx, rx) = async_channel::bounded(8);
+        let mut worker = Worker::new(move |value| {
+            tx.send_blocking(value).unwrap();
+            if value == 10 {
+                work.wait();
+            }
+            value
+        })
+        .unwrap();
+        worker.try_submit_committed(100, 10).unwrap();
+        assert_eq!(rx.recv().await.unwrap(), 10);
+        worker.try_submit(1, 11).unwrap();
+        worker.try_submit_committed(101, 12).unwrap();
+        worker.try_submit_committed(102, 13).unwrap();
+        worker.try_submit(1, 14).unwrap();
+        assert_eq!(worker.try_submit_committed(103, 15), Err(SubmitError::Full));
+        worker.try_submit(2, 20).unwrap();
+        barrier.wait();
+        // Read execution notices first: completions already queued when generation changes.
+        for value in [12, 13, 20] {
+            assert_eq!(rx.recv().await.unwrap(), value);
+        }
+        worker.try_submit(3, 30).unwrap();
+        let mut results = Vec::new();
+        for _ in 0..4 {
+            let c = worker.next().await.unwrap();
+            results.push((c.generation, c.value));
+        }
+        assert_eq!(results, [(100, 10), (101, 12), (102, 13), (3, 30)]);
+    });
+}

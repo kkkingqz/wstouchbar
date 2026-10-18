@@ -7,6 +7,7 @@ use crate::{
 };
 use std::{io, path::PathBuf};
 use touchbar_protocol::DamageRect;
+#[derive(Clone)]
 pub enum Operation {
     Switch(SwitchPlan),
     CheckMaster(PathBuf),
@@ -91,4 +92,15 @@ pub fn device_worker(guard: impl Send + 'static) -> io::Result<DeviceWorker> {
         _guard: guard,
     };
     Worker::new(move |operation| backend.execute(operation))
+}
+
+/// Embed DRM in the daemon's single worker alongside persistence/sysfs operations.
+pub(crate) fn executor(
+    guard: impl Send + 'static,
+) -> impl FnMut(Operation) -> io::Result<Reply> + Send {
+    let mut backend = Backend {
+        surface: None,
+        _guard: guard,
+    };
+    move |operation| backend.execute(operation)
 }

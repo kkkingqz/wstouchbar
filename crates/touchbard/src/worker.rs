@@ -1,15 +1,23 @@
-//! One blocking operation in flight and four queued. Idle uses channel notifications only.
-use async_channel::{Receiver, Sender, TrySendError};
+//! One blocking operation in flight and four queued; idle waits on notifications only.
+use async_channel::Receiver;
 use std::{
+    collections::VecDeque,
     io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::{Arc, Condvar, Mutex},
 };
 struct Job<Q> {
     generation: u64,
+    committed: bool,
     value: Q,
+}
+struct Queue<Q> {
+    jobs: VecDeque<Job<Q>>,
+    generation: u64,
+    closed: bool,
+}
+struct Shared<Q> {
+    queue: Mutex<Queue<Q>>,
+    ready: Condvar,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct Completion<R> {
@@ -25,81 +33,113 @@ pub enum SubmitError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorkerClosed;
 pub struct Worker<Q, R> {
-    request: Sender<Job<Q>>,
-    purge: Receiver<Job<Q>>,
-    reply: Receiver<Completion<R>>,
-    generation: Arc<AtomicU64>,
-    closed: Arc<AtomicBool>,
+    shared: Arc<Shared<Q>>,
+    reply: Receiver<(bool, Completion<R>)>,
 }
 impl<Q: Send + 'static, R: Send + 'static> Worker<Q, R> {
     pub fn new(mut execute: impl FnMut(Q) -> R + Send + 'static) -> io::Result<Self> {
-        let (request, receive) = async_channel::bounded::<Job<Q>>(4);
-        let purge = receive.clone();
+        let shared = Arc::new(Shared {
+            queue: Mutex::new(Queue {
+                jobs: VecDeque::new(),
+                generation: 0,
+                closed: false,
+            }),
+            ready: Condvar::new(),
+        });
+        let work = shared.clone();
         let (send, reply) = async_channel::bounded(5);
-        let generation = Arc::new(AtomicU64::new(0));
-        let epoch = generation.clone();
-        let closed = Arc::new(AtomicBool::new(false));
-        let stopping = closed.clone();
         std::thread::Builder::new()
             .name("touchbar-device".into())
             .spawn(move || {
-                while let Ok(job) = receive.recv_blocking() {
-                    if stopping.load(Ordering::Acquire) {
-                        break;
-                    }
-                    if job.generation != epoch.load(Ordering::Acquire) {
-                        continue;
-                    }
+                loop {
+                    let job = {
+                        let mut queue = work.queue.lock().unwrap();
+                        while queue.jobs.is_empty() && !queue.closed {
+                            queue = work.ready.wait(queue).unwrap();
+                        }
+                        if queue.closed {
+                            break;
+                        }
+                        queue.jobs.pop_front().unwrap()
+                    };
                     let value = execute(job.value);
-                    if stopping.load(Ordering::Acquire) {
-                        break;
-                    }
-                    if job.generation != epoch.load(Ordering::Acquire) {
-                        continue;
+                    {
+                        let queue = work.queue.lock().unwrap();
+                        if queue.closed {
+                            break;
+                        }
+                        if !job.committed && job.generation != queue.generation {
+                            continue;
+                        }
                     }
                     if send
-                        .send_blocking(Completion {
-                            generation: job.generation,
-                            value,
-                        })
+                        .send_blocking((
+                            job.committed,
+                            Completion {
+                                generation: job.generation,
+                                value,
+                            },
+                        ))
                         .is_err()
                     {
                         break;
                     }
                 }
             })?;
-        Ok(Self {
-            request,
-            purge,
-            reply,
-            generation,
-            closed,
-        })
+        Ok(Self { shared, reply })
     }
+    /// Mode work: a newer generation atomically cancels only queued mode jobs.
     pub fn try_submit(&mut self, generation: u64, value: Q) -> Result<(), SubmitError> {
-        if self.closed.load(Ordering::Acquire) || self.request.is_closed() {
+        self.submit(generation, false, value)
+    }
+    /// System work: survives mode changes, sharing the same bounded FIFO and worker.
+    /// `serial` identifies its completion independently of the mode generation.
+    pub fn try_submit_committed(&mut self, serial: u64, value: Q) -> Result<(), SubmitError> {
+        self.submit(serial, true, value)
+    }
+    pub fn advance_generation(&mut self, generation: u64) -> Result<(), SubmitError> {
+        let mut queue = self.shared.queue.lock().unwrap();
+        if queue.closed || self.reply.is_closed() {
             return Err(SubmitError::Closed);
         }
-        let previous = self.generation.load(Ordering::Acquire);
-        if generation < previous {
+        if generation < queue.generation {
             return Err(SubmitError::Stale);
         }
-        if generation > previous {
-            self.generation.store(generation, Ordering::Release);
-            while self.purge.try_recv().is_ok() {}
-            while self.reply.try_recv().is_ok() {}
+        queue.generation = generation;
+        queue
+            .jobs
+            .retain(|job| job.committed || job.generation == generation);
+        Ok(())
+    }
+    fn submit(&mut self, generation: u64, committed: bool, value: Q) -> Result<(), SubmitError> {
+        let mut queue = self.shared.queue.lock().unwrap();
+        if queue.closed || self.reply.is_closed() {
+            return Err(SubmitError::Closed);
         }
-        self.request
-            .try_send(Job { generation, value })
-            .map_err(|error| match error {
-                TrySendError::Full(_) => SubmitError::Full,
-                TrySendError::Closed(_) => SubmitError::Closed,
-            })
+        if !committed {
+            if generation < queue.generation {
+                return Err(SubmitError::Stale);
+            }
+            if generation > queue.generation {
+                queue.generation = generation;
+                queue.jobs.retain(|job| job.committed);
+            }
+        }
+        if queue.jobs.len() == 4 {
+            return Err(SubmitError::Full);
+        }
+        queue.jobs.push_back(Job {
+            generation,
+            committed,
+            value,
+        });
+        self.shared.ready.notify_one();
+        Ok(())
     }
     pub async fn next(&self) -> Result<Completion<R>, WorkerClosed> {
         loop {
-            let reply = self.reply.recv().await.map_err(|_| WorkerClosed)?;
-            if reply.generation == self.generation.load(Ordering::Acquire) {
+            let (committed, reply) = self.reply.recv().await.map_err(|_| WorkerClosed)?;
+            if committed || reply.generation == self.shared.queue.lock().unwrap().generation {
                 return Ok(reply);
             }
         }
@@ -107,10 +147,11 @@ impl<Q: Send + 'static, R: Send + 'static> Worker<Q, R> {
 }
 impl<Q, R> Drop for Worker<Q, R> {
     fn drop(&mut self) {
-        self.closed.store(true, Ordering::Release);
-        self.request.close();
+        let mut queue = self.shared.queue.lock().unwrap();
+        queue.closed = true;
+        queue.jobs.clear();
+        self.shared.ready.notify_one();
         self.reply.close();
-        // Never join here: a kernel operation may still be blocked. The policy's safety deadline
-        // must remain effective. The worker drops all queued tasks once that operation returns.
+        // Never join: the policy's safety deadline must survive a blocked kernel operation.
     }
 }

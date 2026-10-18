@@ -197,6 +197,10 @@ impl Autodim {
             owner: self.clone(),
         }))
     }
+    /// A previous daemon may have disabled the parameter before crashing.
+    pub fn owned(&self) -> io::Result<bool> {
+        Ok(self.marker()?.is_some())
+    }
     pub fn take_over(&self) -> io::Result<bool> {
         match self.prepare_take_over()? {
             Some(prepared) => {

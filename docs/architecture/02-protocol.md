@@ -88,7 +88,7 @@
 | `SetMode{native\|display}` | то же | `native` включает recovery, `display` выключает его |
 | `Reload` | только root | Перечитать `touchbard.toml` |
 
-Сон обрабатывается напрямую через logind `PrepareForSleep` и delay-inhibitor, команд сна в управляющем протоколе нет (D106).
+Сон обрабатывается напрямую через logind `PrepareForSleep` и delay-inhibitor, команд сна в управляющем протоколе нет (D105).
 
 ## Точные значения и ограничения
 

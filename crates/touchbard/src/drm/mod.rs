@@ -7,3 +7,5 @@ mod surface;
 pub use surface::{CommitMode, Completion, Exports, Submission, Surface, monotonic_us};
 mod backend;
 pub use backend::{DeviceWorker, Operation, Reply, device_worker};
+
+pub(crate) use backend::executor;

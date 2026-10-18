@@ -46,3 +46,19 @@ fn help_documents_crash_hand_back_and_extra_arguments_are_rejected() {
         .unwrap();
     assert_eq!(bad.status.code(), Some(2));
 }
+
+#[test]
+fn help_lists_daemon_paths_and_incomplete_arguments_fail_before_hardware() {
+    let help = Command::new(binary()).arg("--help").output().unwrap();
+    let text = String::from_utf8_lossy(&help.stdout);
+    assert!(text.contains("--config DIR") && text.contains("--runtime DIR"));
+    for args in [
+        vec!["--config"],
+        vec!["--runtime"],
+        vec!["--config", "relative"],
+        vec!["--runtime", "relative"],
+    ] {
+        let output = Command::new(binary()).args(args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+    }
+}
