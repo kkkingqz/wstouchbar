@@ -201,3 +201,49 @@ fn committed_jobs_and_replies_survive_generation_changes_in_fifo_order() {
         assert_eq!(results, [(100, 10), (101, 12), (102, 13), (3, 30)]);
     });
 }
+
+#[test]
+fn generation_change_drops_stale_result_resources_before_returning() {
+    futures_lite::future::block_on(async {
+        struct Resource {
+            value: u8,
+            closed: std::sync::mpsc::Sender<u8>,
+        }
+        impl Drop for Resource {
+            fn drop(&mut self) {
+                let _ = self.closed.send(self.value);
+            }
+        }
+        let (closed, observed) = std::sync::mpsc::channel();
+        let (started, notices) = async_channel::bounded(4);
+        let barrier = Arc::new(Barrier::new(2));
+        let gate = barrier.clone();
+        let mut worker = Worker::new(move |value| {
+            started.send_blocking(value).unwrap();
+            if value == 1 {
+                gate.wait();
+            }
+            Resource {
+                value,
+                closed: closed.clone(),
+            }
+        })
+        .unwrap();
+        worker.try_submit(1, 0).unwrap();
+        worker.try_submit(1, 1).unwrap();
+        assert_eq!(notices.recv().await.unwrap(), 0);
+        assert_eq!(notices.recv().await.unwrap(), 1);
+        // The second operation has started, proving the first result is already queued.
+        worker.advance_generation(2).unwrap();
+        let released = observed.try_recv().ok();
+        worker.try_submit(2, 2).unwrap();
+        barrier.wait();
+        let reply = worker.next().await.unwrap();
+        assert_eq!(reply.value.value, 2);
+        assert_eq!(
+            released,
+            Some(0),
+            "old DRM-like result survived generation change"
+        );
+    });
+}
