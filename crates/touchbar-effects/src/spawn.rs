@@ -448,6 +448,12 @@ fn send(
                 return false;
             }
             Ready::HelperExited => {
+                // Delivery backpressure must not postpone cleanup. The unreaped helper
+                // still reserves its process-group id, just as in the outer wait loop.
+                let c = lock(control);
+                if !c.reaped {
+                    native::signal_group(c.pid, libc::SIGKILL);
+                }
                 *drain_deadline = Some(Instant::now() + Duration::from_secs(1));
             }
         }
@@ -619,6 +625,11 @@ fn run(
         if drain_deadline.is_some_and(|at| Instant::now() >= at) {
             failure
                 .get_or_insert_with(|| failed("supervisor exited with inherited pipes still open"));
+            // send() may have observed helper death while the output channel was full.
+            // Reap that helper at the top before completing or releasing its quota.
+            if !exited {
+                continue;
+            }
             break;
         }
         let next = deadline
@@ -800,5 +811,72 @@ mod tests {
             }
         }
         worker.join().unwrap();
+    }
+    #[test]
+    fn full_line_delivery_kills_owned_group_when_helper_exits() {
+        use std::os::unix::process::CommandExt;
+        let path =
+            std::env::temp_dir().join(format!("wstouchbar-dead-helper-{}", std::process::id()));
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 60 & echo $! > \"$1\"; wait", "fixture"])
+            .arg(&path)
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let descendant = loop {
+            if let Ok(text) = std::fs::read_to_string(&path)
+                && let Ok(pid) = text.trim().parse::<u32>()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        rustix::process::kill_process(
+            rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()).unwrap(),
+            rustix::process::Signal::KILL,
+        )
+        .unwrap();
+        while !native::exited_without_reaping(pid).unwrap() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let (read, write) = UnixStream::pair().unwrap();
+        let wake = async_io::Async::new(read).unwrap();
+        let pidfd = async_io::Async::new(native::pidfd(pid).unwrap()).unwrap();
+        let control = Mutex::new(Control {
+            pid,
+            done: false,
+            reaped: false,
+            cancel: None,
+            wake: write,
+        });
+        let (events, _receiver) = async_channel::bounded(1);
+        events
+            .send_blocking(ProcessEvent::Line("occupied".into()))
+            .unwrap();
+        let delivered = send(
+            &events,
+            ProcessEvent::Line("blocked".into()),
+            &control,
+            &wake,
+            None,
+            &pidfd,
+            &mut None,
+        );
+        let running = std::fs::read_to_string(format!("/proc/{descendant}/stat")).is_ok_and(|s| {
+            s.rsplit_once(") ")
+                .is_some_and(|(_, rest)| !rest.starts_with('Z'))
+        });
+        native::signal_group(pid, libc::SIGKILL);
+        child.wait().unwrap();
+        let _ = std::fs::remove_file(path);
+        assert!(!delivered);
+        assert!(
+            !running,
+            "full output channel postponed descendant cleanup until after completion"
+        );
     }
 }
