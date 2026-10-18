@@ -165,12 +165,72 @@ impl Egl {
             .context("make GLES context current")
     }
 }
+impl Egl {
+    pub fn import_dma_buf(
+        &self,
+        fd: std::os::fd::BorrowedFd<'_>,
+        h: touchbar_protocol::SwapchainHeader,
+    ) -> Result<e::Image> {
+        use std::os::fd::AsRawFd;
+        let extensions = self
+            .api
+            .query_string(Some(self.display), e::EXTENSIONS)?
+            .to_str()?;
+        ensure!(
+            extensions
+                .split_whitespace()
+                .any(|s| s == "EGL_EXT_image_dma_buf_import"),
+            "EGL_EXT_image_dma_buf_import unavailable"
+        );
+        let attrs = [
+            e::WIDTH as e::Attrib,
+            h.physical_width as e::Attrib,
+            e::HEIGHT as e::Attrib,
+            h.physical_height as e::Attrib,
+            0x3271,
+            h.format as e::Attrib,
+            0x3272,
+            e::Attrib::try_from(fd.as_raw_fd())?,
+            0x3273,
+            0,
+            0x3274,
+            h.pitch as e::Attrib,
+            e::ATTRIB_NONE,
+        ];
+        // SAFETY: dma-buf import explicitly requires EGL_NO_CONTEXT and NULL client buffer;
+        // attrs supplies the single-plane XRGB layout and owned fd remains alive.
+        self.api
+            .create_image(
+                self.display,
+                unsafe { e::Context::from_ptr(ptr::null_mut()) },
+                0x3270,
+                unsafe { e::ClientBuffer::from_ptr(ptr::null_mut()) },
+                &attrs,
+            )
+            .context("import dma-buf EGLImage")
+    }
+    pub fn destroy_dma_image(&self, image: e::Image) {
+        let _ = self.api.destroy_image(self.display, image);
+    }
+    pub fn image_renderbuffer(&self) -> Result<unsafe extern "system" fn(u32, *mut c_void)> {
+        let f = self
+            .api
+            .get_proc_address("glEGLImageTargetRenderbufferStorageOES")
+            .context("GL_OES_EGL_image entrypoint unavailable")?;
+        // SAFETY: this named EGL proc has the OES signature; API library outlives its use.
+        Ok(unsafe {
+            std::mem::transmute::<extern "system" fn(), unsafe extern "system" fn(u32, *mut c_void)>(
+                f,
+            )
+        })
+    }
+}
 impl Drop for Egl {
     fn drop(&mut self) {
         if !self.initialized {
             return;
         }
-        // No GPU handles escape their renderer; teardown follows its GL object cleanup.
+        // The owning DeviceContext outlives every renderer/imported target sharing it.
         let _ = self.api.make_current(self.display, None, None, None);
         if let Some(surface) = self.surface.take() {
             let _ = self.api.destroy_surface(self.display, surface);

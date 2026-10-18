@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rustix.workspace = true
+libc = "0.2"
+touchbar-protocol.workspace = true
 anyhow.workspace = true
 touchbar-model.workspace = true
 touchbar-ui.workspace = true
@@ -17,6 +20,11 @@ png.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+touchbard.workspace = true
+async-signal.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+libloading = "0.8"
 touchbar-core.workspace = true
 touchbar-scene.workspace = true
 touchbar-sets.workspace = true

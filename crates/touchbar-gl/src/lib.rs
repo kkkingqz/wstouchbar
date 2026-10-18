@@ -20,6 +20,8 @@ pub enum Orientation {
     Landscape,
     Clockwise,
     CounterClockwise,
+    /// Exchange X/Y for the portrait v2 shared-buffer layout.
+    Transpose,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DamageRect {
@@ -73,6 +75,39 @@ impl RenderedFrame {
         Ok(())
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetPath {
+    Direct,
+    Copy,
+}
+impl TargetPath {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Copy => "copy",
+        }
+    }
+}
+/// Owned imported buffers; like Renderer, this object stays on its EGL thread.
+pub struct ImportedTarget(imported::Target);
+impl ImportedTarget {
+    pub fn path(&self) -> TargetPath {
+        self.0.path()
+    }
+    pub fn warning(&self) -> Option<&str> {
+        self.0.warning()
+    }
+    pub fn header(&self) -> touchbar_protocol::SwapchainHeader {
+        self.0.header
+    }
+}
+#[derive(Clone, Debug)]
+pub struct TargetFrame {
+    /// Difference from the previously rendered frame, in physical coordinates.
+    pub damage: Vec<DamageRect>,
+    /// Coverage written to this buffer, including changes it missed while held elsewhere.
+    pub copied: Vec<DamageRect>,
+}
 pub struct Renderer(native::Native);
 impl Renderer {
     pub fn new(backend: Backend) -> anyhow::Result<Self> {
@@ -91,7 +126,30 @@ impl Renderer {
     ) -> anyhow::Result<Option<RenderedFrame>> {
         self.0.render(surface, size, orientation, list, force_full)
     }
+    pub fn import_target(
+        &mut self,
+        fds: Vec<std::os::fd::OwnedFd>,
+        header: touchbar_protocol::SwapchainHeader,
+    ) -> anyhow::Result<ImportedTarget> {
+        Ok(ImportedTarget(self.0.import_target(fds, header)?))
+    }
+    pub fn render_target(
+        &mut self,
+        surface: SurfaceId,
+        target: &mut ImportedTarget,
+        index: u32,
+        list: &DisplayList,
+        force_full: bool,
+    ) -> anyhow::Result<Option<TargetFrame>> {
+        self.0
+            .render_target(surface, &mut target.0, index, list, force_full)
+    }
     pub fn remove_surface(&mut self, surface: SurfaceId) {
         self.0.remove_surface(surface);
     }
 }
+
+mod target_history;
+
+mod imported;
+mod target_memory;

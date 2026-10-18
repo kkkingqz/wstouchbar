@@ -3,7 +3,7 @@
 use crate::{Backend, DamageRect, Orientation, RenderedFrame, egl::DeviceContext, shaders};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use glow::HasContext;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 use touchbar_model::SurfaceId;
 use touchbar_ui::{self as u, Color, DisplayList, DrawCommand, Point, Rect, Resource};
 
@@ -70,8 +70,13 @@ impl Affine {
         }
     }
 }
+pub(crate) struct Prepared {
+    pub fbo: glow::Framebuffer,
+    pub size: (u32, u32),
+    pub damage: Vec<DamageRect>,
+}
 pub(crate) struct Native {
-    device: DeviceContext,
+    device: Rc<DeviceContext>,
     programs: BTreeMap<&'static str, Program>,
     mesh_buffer: glow::Buffer,
     mesh_vao: glow::VertexArray,
@@ -83,7 +88,7 @@ pub(crate) struct Native {
 }
 impl Native {
     pub fn new(backend: &Backend) -> Result<Self> {
-        let device = DeviceContext::new(backend)?;
+        let device = Rc::new(DeviceContext::new(backend)?);
         let gl = &device.gl;
         let mut programs = BTreeMap::new();
         // SAFETY: the device constructor made its context current; handles never escape.
@@ -169,7 +174,12 @@ impl Native {
         } else {
             self.surface(size, orientation)?
         };
-        let result = self.render_surface(&mut surface, list, full);
+        let result = self
+            .prepare(&mut surface, list, full)
+            .and_then(|frame| frame.map(|p| self.readback(p)).transpose());
+        if result.is_err() {
+            surface.previous = None;
+        }
         self.surfaces.insert(id, surface);
         result
     }
@@ -208,12 +218,12 @@ impl Native {
             result
         }
     }
-    fn render_surface(
+    fn prepare(
         &mut self,
         surface: &mut Surface,
         list: &DisplayList,
         full: bool,
-    ) -> Result<Option<RenderedFrame>> {
+    ) -> Result<Option<Prepared>> {
         let next = surface.previous.map_or(0, |old| 1 - old);
         let size = surface.size;
         self.draw(&surface.logical[next], size, list)?;
@@ -241,10 +251,11 @@ impl Native {
                 gl.uniform_2_i32(program.uniform("u_size"), size.0 as i32, size.1 as i32);
                 gl.uniform_1_i32(
                     program.uniform("u_orientation"),
-                    if surface.orientation == Orientation::Clockwise {
-                        1
-                    } else {
-                        2
+                    match surface.orientation {
+                        Orientation::Clockwise => 1,
+                        Orientation::CounterClockwise => 2,
+                        Orientation::Transpose => 3,
+                        Orientation::Landscape => 0,
                     },
                 );
                 gl.draw_arrays(glow::TRIANGLES, 0, 3);
@@ -253,16 +264,27 @@ impl Native {
                 (surface.logical[next].fbo, size)
             }
         };
-        let mut pixels = vec![0; output_size.0 as usize * output_size.1 as usize * 4];
-        // SAFETY: the output slice has exactly width*height*4 bytes; readback waits for GPU completion.
+        let damage = damage(&spans, size, surface.orientation);
+        surface.previous = Some(next);
+        Ok(Some(Prepared {
+            fbo,
+            size: output_size,
+            damage,
+        }))
+    }
+    fn readback(&self, frame: Prepared) -> Result<RenderedFrame> {
+        let (w, h) = frame.size;
+        let gl = &self.device.gl;
+        let mut pixels = vec![0; w as usize * h as usize * 4];
+        // SAFETY: current owning context and exact width*height*4 output extent.
         unsafe {
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(frame.fbo));
             gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
             gl.read_pixels(
                 0,
                 0,
-                output_size.0 as i32,
-                output_size.1 as i32,
+                w as i32,
+                h as i32,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
                 glow::PixelPackData::Slice(Some(&mut pixels)),
@@ -272,15 +294,74 @@ impl Native {
                 "GLES render/readback error"
             );
         }
-        flip_rows(&mut pixels, output_size);
-        let damage = damage(&spans, size, surface.orientation);
-        surface.previous = Some(next);
-        Ok(Some(RenderedFrame {
-            width: output_size.0,
-            height: output_size.1,
+        flip_rows(&mut pixels, (w, h));
+        Ok(RenderedFrame {
+            width: w,
+            height: h,
             pixels,
-            damage,
-        }))
+            damage: frame.damage,
+        })
+    }
+    pub fn import_target(
+        &mut self,
+        fds: Vec<std::os::fd::OwnedFd>,
+        header: touchbar_protocol::SwapchainHeader,
+    ) -> Result<crate::imported::Target> {
+        header.validate()?;
+        validate_size((header.logical_width, header.logical_height))?;
+        self.device.owner.current()?;
+        // SAFETY: this thread's owning context is current.
+        let limit = unsafe { self.device.gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE) };
+        ensure!(
+            i64::from(header.physical_width) <= i64::from(limit)
+                && i64::from(header.physical_height) <= i64::from(limit),
+            "target exceeds GPU texture size"
+        );
+        crate::imported::Target::new(self.device.clone(), fds, header)
+    }
+    pub fn render_target(
+        &mut self,
+        id: SurfaceId,
+        target: &mut crate::imported::Target,
+        index: u32,
+        list: &DisplayList,
+        full: bool,
+    ) -> Result<Option<crate::TargetFrame>> {
+        ensure!(
+            Rc::ptr_eq(&self.device, &target.device),
+            "imported target belongs to another renderer"
+        );
+        ensure!(
+            index < u32::from(target.header.buffer_count),
+            "target buffer index outside swapchain"
+        );
+        list.validate()?;
+        self.device.owner.current()?;
+        let size = (target.header.logical_width, target.header.logical_height);
+        let orientation = match target.header.transform() {
+            Some(touchbar_protocol::OutputTransform::Identity) => Orientation::Landscape,
+            _ => Orientation::Transpose,
+        };
+        let full = target.bind(id) || full;
+        let mut surface = if let Some(old) = self.surfaces.remove(&id) {
+            if old.size == size && old.orientation == orientation {
+                old
+            } else {
+                self.destroy_surface(old);
+                self.surface(size, orientation)?
+            }
+        } else {
+            self.surface(size, orientation)?
+        };
+        let result = self
+            .prepare(&mut surface, list, full)
+            .and_then(|frame| frame.map(|p| target.write(index, p)).transpose());
+        if result.is_err() {
+            surface.previous = None;
+            target.invalidate();
+        }
+        self.surfaces.insert(id, surface);
+        result
     }
     fn draw(&mut self, target: &Target, size: (u32, u32), list: &DisplayList) -> Result<()> {
         self.clock = self.clock.wrapping_add(1);
@@ -872,7 +953,7 @@ fn damage(spans: &[(u32, u32)], size: (u32, u32), orientation: Orientation) -> V
                 width: end - start,
                 height: size.1,
             },
-            Orientation::Clockwise => DamageRect {
+            Orientation::Clockwise | Orientation::Transpose => DamageRect {
                 x: 0,
                 y: start,
                 width: size.1,

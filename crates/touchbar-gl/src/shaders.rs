@@ -147,6 +147,7 @@ void main() {
     ivec2 p=ivec2(gl_FragCoord.xy);
     if (u_orientation==1) p=ivec2(u_size.x-1-p.y,p.x);
     else if (u_orientation==2) p=ivec2(p.y,u_size.y-1-p.x);
+    else if (u_orientation==3) p=ivec2(u_size.x-1-p.y,u_size.y-1-p.x);
     color=texelFetch(u_image,p,0);
 }
 "#;

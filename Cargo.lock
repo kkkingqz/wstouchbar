@@ -2702,18 +2702,26 @@ name = "touchbar-gl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-io",
+ "async-signal",
  "cosmic-text",
+ "futures-lite",
  "glow",
  "khronos-egl",
+ "libc",
+ "libloading",
  "naga",
  "png",
+ "rustix 1.1.5",
  "serde_json",
  "thiserror 2.0.21",
  "touchbar-core",
  "touchbar-model",
+ "touchbar-protocol",
  "touchbar-scene",
  "touchbar-sets",
  "touchbar-ui",
+ "touchbard",
 ]
 
 [[package]]
