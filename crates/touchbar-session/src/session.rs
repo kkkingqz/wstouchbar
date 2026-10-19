@@ -102,6 +102,8 @@ struct SurfaceState {
     last: Option<Arc<PresentedFrame>>,
     gl_failures: u8,
     gl_retry: Option<Timestamp>,
+    target: Option<touchbar_gl::ImportedTarget>,
+    mode: Mode,
 }
 #[derive(Default, Clone, Debug)]
 pub struct PumpStats {
@@ -130,6 +132,23 @@ trait PixelRenderer {
         size: (u32, u32),
         list: &touchbar_ui::DisplayList,
     ) -> Result<Option<touchbar_gl::RenderedFrame>>;
+    fn import_target(
+        &mut self,
+        _buffers: Vec<std::os::fd::OwnedFd>,
+        _header: touchbar_protocol::SwapchainHeader,
+    ) -> Result<touchbar_gl::ImportedTarget> {
+        Err(anyhow!("renderer cannot import shared buffers"))
+    }
+    fn render_target(
+        &mut self,
+        _surface: SurfaceId,
+        _target: &mut touchbar_gl::ImportedTarget,
+        _index: u32,
+        _list: &touchbar_ui::DisplayList,
+        _full: bool,
+    ) -> Result<Option<touchbar_gl::TargetFrame>> {
+        Err(anyhow!("renderer cannot render shared buffers"))
+    }
     fn remove_surface(&mut self, surface: SurfaceId);
 }
 impl PixelRenderer for touchbar_gl::Renderer {
@@ -147,11 +166,33 @@ impl PixelRenderer for touchbar_gl::Renderer {
             false,
         )
     }
+    fn import_target(
+        &mut self,
+        buffers: Vec<std::os::fd::OwnedFd>,
+        header: touchbar_protocol::SwapchainHeader,
+    ) -> Result<touchbar_gl::ImportedTarget> {
+        self.import_target(buffers, header)
+    }
+    fn render_target(
+        &mut self,
+        surface: SurfaceId,
+        target: &mut touchbar_gl::ImportedTarget,
+        index: u32,
+        list: &touchbar_ui::DisplayList,
+        full: bool,
+    ) -> Result<Option<touchbar_gl::TargetFrame>> {
+        self.render_target(surface, target, index, list, full)
+    }
     fn remove_surface(&mut self, surface: SurfaceId) {
         self.remove_surface(surface);
     }
 }
 type RendererFactory = Box<dyn Fn(touchbar_gl::Backend) -> Result<Box<dyn PixelRenderer>>>;
+enum SharedFrame {
+    Deferred,
+    Unchanged,
+    Ready(touchbar_gl::TargetFrame),
+}
 struct FailedPersist {
     key: PersistKey,
     fields: StatePatch,
@@ -184,6 +225,7 @@ pub struct Session {
     failed_persist: Vec<FailedPersist>,
     persist_retry: Option<Timestamp>,
     metrics: Metrics,
+    pub(crate) touchbard_status: Option<crate::touchbard::Status>,
     pub(crate) last_calls: BTreeMap<InstanceId, Timestamp>,
     latest_load_issues: Vec<LoadIssue>,
     stopped: bool,
@@ -261,6 +303,7 @@ impl Session {
             failed_persist: Vec::new(),
             persist_retry: None,
             metrics: Metrics::default(),
+            touchbard_status: None,
             last_calls: BTreeMap::new(),
             latest_load_issues: Vec::new(),
             stopped: false,
@@ -393,6 +436,8 @@ impl Session {
                 last: None,
                 gl_failures: 0,
                 gl_retry: None,
+                target: None,
+                mode: Mode::Display,
             },
         );
         Ok(())
@@ -557,6 +602,11 @@ impl Session {
         Ok(stats)
     }
     fn before_input(&mut self, input: &Input) -> Result<()> {
+        if let Input::Mode { surface, mode } = input
+            && let Some(state) = self.surfaces.get_mut(surface)
+        {
+            state.mode = *mode;
+        }
         match input {
             Input::SurfaceChanged(info) => {
                 if let Some(state) = self.surfaces.get_mut(&info.id) {
@@ -576,7 +626,9 @@ impl Session {
                     state.queued = None;
                     state.gl_retry = None;
                     state.visual_dirty = false;
-                    state.pacer.stop_animation();
+                    state.pacer.cancel();
+                    state.last = None;
+                    state.target = None;
                 }
             }
             Input::FrameDone {
@@ -621,6 +673,20 @@ impl Session {
         match event {
             Event::Input(input) | Event::Surface(SurfaceEvent::Input(input)) => {
                 self.enqueue(Work::Input(input))?
+            }
+            Event::Surface(SurfaceEvent::RetryPresent(id)) => {
+                if let Some(frame) = self
+                    .surfaces
+                    .get(&id)
+                    .filter(|s| s.pacer.busy())
+                    .and_then(|s| s.last.clone())
+                {
+                    self.enqueue(Work::Present {
+                        surface: id,
+                        frame,
+                        started: Instant::now(),
+                    })?;
+                }
             }
             Event::Surface(SurfaceEvent::Closed(id)) => {
                 self.enqueue(Work::Input(Input::SurfaceRemoved(id)))?
@@ -859,6 +925,9 @@ impl Session {
         let Some(state) = self.surfaces.get_mut(&id) else {
             return Ok(false);
         };
+        if state.mode == Mode::Native {
+            return Ok(false);
+        }
         if state.gl_retry.is_some_and(|at| now < at) {
             state.generation = Some(generation);
             state.scene = Some(scene);
@@ -927,6 +996,7 @@ impl Session {
             display_list: frame.display_list,
             layout: frame.layout,
             pixels: None,
+            target: None,
         });
         // Present is a separate queue step: core applies Layout before any GL or
         // transport work. It cannot be re-entered from a surface callback.
@@ -956,6 +1026,68 @@ impl Session {
         let Some(state) = self.surfaces.get_mut(&id) else {
             return Ok(());
         };
+        if state.mode == Mode::Native {
+            return Ok(());
+        }
+        if state.transport.uses_shared_target() {
+            state.last = Some(frame.clone());
+            let rendered: Result<SharedFrame> = (|| {
+                let Some(slot) = state
+                    .transport
+                    .prepare_shared_target()
+                    .map_err(|e| anyhow!(e))?
+                else {
+                    return Ok(SharedFrame::Deferred);
+                };
+                if self.gl.is_none() {
+                    self.gl = Some((self.gl_factory)(self.options.gl.clone())?);
+                }
+                let gl = self.gl.as_mut().expect("initialized renderer");
+                if let Some(buffers) = slot.buffers {
+                    let target = gl.import_target(buffers, slot.header)?;
+                    if let Some(warning) = target.warning() {
+                        tracing::warn!(event = "touchbar-buffer-path", message = warning);
+                    }
+                    state.transport.target_imported(target.path());
+                    state.target = Some(target);
+                }
+                let target = state
+                    .target
+                    .as_mut()
+                    .ok_or_else(|| anyhow!("shared target missing"))?;
+                let rendered =
+                    gl.render_target(id, target, slot.index, &frame.display_list, slot.force_full)?;
+                if let Some(rendered) = rendered {
+                    Ok(SharedFrame::Ready(rendered))
+                } else {
+                    state
+                        .transport
+                        .frame_unchanged()
+                        .map_err(anyhow::Error::msg)?;
+                    Ok(SharedFrame::Unchanged)
+                }
+            })();
+            match rendered {
+                Ok(SharedFrame::Ready(rendered)) => {
+                    Arc::make_mut(&mut frame).target = Some(rendered)
+                }
+                Ok(SharedFrame::Deferred) => return Ok(()),
+                Ok(SharedFrame::Unchanged) => {
+                    Self::sample(&mut self.metrics.frame_ms, started.elapsed());
+                    self.enqueue(Work::Input(Input::FrameDone {
+                        surface: id,
+                        generation: frame.generation,
+                    }))?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    self.error(None, &format!("Touch Bar shared target: {error:#}"));
+                    self.enqueue(Work::Input(Input::Revoked { surface: id }))?;
+                    self.enqueue(Work::Input(Input::SurfaceRemoved(id)))?;
+                    return Ok(());
+                }
+            }
+        }
         if state.transport.needs_pixels() {
             let pixels = (|| {
                 if self.gl.is_none() {

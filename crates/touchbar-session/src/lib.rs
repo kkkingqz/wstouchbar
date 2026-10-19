@@ -13,3 +13,5 @@ pub mod driver;
 pub mod simulator;
 
 pub mod control;
+
+pub mod touchbard;

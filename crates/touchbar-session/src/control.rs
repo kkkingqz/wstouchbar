@@ -9,7 +9,7 @@ pub struct Timing {
     pub p99: Option<f64>,
 }
 impl Timing {
-    fn from(values: &std::collections::VecDeque<f64>) -> Self {
+    pub(crate) fn from(values: &std::collections::VecDeque<f64>) -> Self {
         let mut sorted = values.iter().copied().collect::<Vec<_>>();
         sorted.sort_by(f64::total_cmp);
         let percentile = |p: usize| {
@@ -31,6 +31,7 @@ pub struct StatusMetrics {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
+    pub touchbar: Option<crate::touchbard::Status>,
     pub core: touchbar_core::CoreSnapshot,
     pub load_issues: Vec<touchbar_loader::LoadIssue>,
     pub last_calls: Vec<(InstanceId, Timestamp)>,
@@ -40,6 +41,7 @@ pub struct Status {
 impl Session {
     pub fn status(&self) -> Status {
         Status {
+            touchbar: self.touchbard_status.clone(),
             core: self.snapshot(),
             load_issues: self.load_issues().into(),
             last_calls: self.last_calls.iter().map(|(i, t)| (*i, *t)).collect(),

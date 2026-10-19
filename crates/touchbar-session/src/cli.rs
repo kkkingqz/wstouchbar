@@ -10,8 +10,9 @@ pub struct Cli {
     pub headless: Option<SurfaceInfo>,
     pub desktop: Option<DesktopChoice>,
     pub fake_effects: bool,
+    pub touchbard_socket: Option<PathBuf>,
 }
-pub const USAGE: &str = "touchbar-session [--plugins DIR] [--simulator --surface NAME=WxH@ppmm ...] [--headless WxH@ppmm] [--desktop=null|fake|auto|gnome] [--effects=fake]";
+pub const USAGE: &str = "touchbar-session [--plugins DIR] [--touchbard-socket PATH] [--simulator --surface NAME=WxH@ppmm ...] [--headless WxH@ppmm] [--desktop=null|fake|auto|gnome] [--effects=fake]";
 impl Cli {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut cli = Self::default();
@@ -27,11 +28,19 @@ impl Cli {
             match key {
                 "--help" | "-h" if inline.is_none() => cli.help = true,
                 "--simulator" if inline.is_none() => cli.simulator = true,
-                "--plugins" | "--surface" | "--headless" | "--desktop" | "--effects" => {
+                "--plugins" | "--surface" | "--headless" | "--desktop" | "--effects"
+                | "--touchbard-socket" => {
                     let value = inline
                         .or_else(|| args.next())
                         .ok_or_else(|| format!("{key} requires a value"))?;
                     match key {
+                        "--touchbard-socket" => {
+                            let path = PathBuf::from(value);
+                            if !path.is_absolute() || path.file_name().is_none() {
+                                return Err("touchbard socket must be an absolute file path".into());
+                            }
+                            cli.touchbard_socket = Some(path);
+                        }
                         "--plugins" => cli.plugins = Some(value.into()),
                         "--surface" => {
                             let (name, geometry) = value

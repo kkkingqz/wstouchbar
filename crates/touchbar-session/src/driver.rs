@@ -44,6 +44,7 @@ enum Ready {
     Backend(touchbar_desktop::BackendEvent),
     Loaded(touchbar_loader::PreparedLoad),
     Simulator(SimulatorEvent),
+    Touchbar(std::result::Result<crate::touchbard::ConnectionEvent, String>),
     Control(touchbar_control::Incoming),
     Watch,
     Wake,
@@ -75,6 +76,11 @@ pub fn run(cli: Cli) -> Result<()> {
     futures_lite::future::block_on(run_async(cli))
 }
 async fn run_async(cli: Cli) -> Result<()> {
+    let touchbard_path = cli.touchbard_socket.clone().or_else(|| {
+        (!cli.simulator && cli.headless.is_none())
+            .then(|| PathBuf::from("/run/touchbar/session.sock"))
+    });
+
     let request = LoadRequest::standard(cli.plugins).map_err(|e| anyhow!(e))?;
     let startup = read_config(&request.config_file).unwrap_or_else(|error| {
         eprintln!("{error}; using default startup configuration");
@@ -140,6 +146,9 @@ async fn run_async(cli: Cli) -> Result<()> {
     } else {
         None
     };
+    let mut touchbar = touchbard_path
+        .map(crate::touchbard::Connector::new)
+        .transpose()?;
     let worker = Worker::new(session.compiler());
     let mut reload_pending = false;
     let mut loading = true;
@@ -153,6 +162,9 @@ async fn run_async(cli: Cli) -> Result<()> {
     let result: Result<()> = async {
         loop {
             session.pump()?;
+            if let Some(touchbar) = &touchbar {
+                session.touchbard_status = Some(touchbar.status());
+            }
             for issue in control.take_issues() {
                 session.warning(&issue);
             }
@@ -191,6 +203,15 @@ async fn run_async(cli: Cli) -> Result<()> {
                             .await
                             .map(Ready::Simulator)
                             .unwrap_or_else(|e| Ready::Failure(format!("Wayland simulator: {e}")))
+                    } else {
+                        std::future::pending::<Ready>().await
+                    }
+                };
+                let hardware = async {
+                    if let Some(touchbar) = &mut touchbar {
+                        Ready::Touchbar(
+                            touchbar.next_event(&clock).await.map_err(|e| e.to_string()),
+                        )
                     } else {
                         std::future::pending::<Ready>().await
                     }
@@ -252,7 +273,7 @@ async fn run_async(cli: Cli) -> Result<()> {
                             race(
                                 backend,
                                 race(
-                                    race(simulated, controlled),
+                                    race(hardware, race(simulated, controlled)),
                                     race(executor, async {
                                         watch.await.unwrap_or_else(|e| {
                                             Ready::Failure(format!("configuration watcher: {e}"))
@@ -267,6 +288,60 @@ async fn run_async(cli: Cli) -> Result<()> {
             };
             match ready {
                 Ready::Stop => break,
+                Ready::Touchbar(Ok(crate::touchbard::ConnectionEvent::Protocol(event))) => {
+                    match event {
+                        crate::touchbard::ClientEvent::Welcome(_) => {
+                            let handle = touchbar
+                                .as_ref()
+                                .and_then(crate::touchbard::Connector::handle)
+                                .expect("connected Welcome");
+                            let added = crate::touchbard::TouchbarSurface::new(handle.clone())
+                                .map_err(anyhow::Error::msg)
+                                .and_then(|surface| session.add_surface(Box::new(surface)));
+                            if let Err(error) = added {
+                                session.warning(&format!("Touch Bar surface: {error:#}"));
+                                handle.close();
+                            }
+                        }
+                        crate::touchbard::ClientEvent::Surface(event) => {
+                            session.handle_event(Event::Surface(event))?
+                        }
+                    }
+                }
+                Ready::Touchbar(Ok(crate::touchbard::ConnectionEvent::Disconnected {
+                    surface,
+                    error,
+                })) => {
+                    session.warning(&error);
+                    if let Some(surface) = surface {
+                        session.handle_event(Event::Input(touchbar_core::Input::Revoked {
+                            surface,
+                        }))?;
+                        session.handle_event(Event::Input(
+                            touchbar_core::Input::SurfaceRemoved(surface),
+                        ))?;
+                    }
+                }
+                Ready::Touchbar(Err(error)) => {
+                    session.warning(&format!("Touch Bar socket watcher: {error}"));
+                    if let Some(mut failed) = touchbar.take() {
+                        if let Some(surface) = failed.handle().and_then(|h| h.info()).map(|i| i.id)
+                        {
+                            session.handle_event(Event::Input(touchbar_core::Input::Revoked {
+                                surface,
+                            }))?;
+                            session.handle_event(Event::Input(
+                                touchbar_core::Input::SurfaceRemoved(surface),
+                            ))?;
+                        }
+                        let mut status = failed.status();
+                        failed.close();
+                        status.connected = false;
+                        status.path = None;
+                        status.error = Some(error);
+                        session.touchbard_status = Some(status);
+                    }
+                }
                 Ready::Failure(error) | Ready::Simulator(SimulatorEvent::Fault(error)) => {
                     return Err(anyhow!(error));
                 }
@@ -361,5 +436,8 @@ async fn run_async(cli: Cli) -> Result<()> {
     .await;
     let shutdown = session.shutdown();
     let drained = session.finish_shutdown().await;
+    if let Some(touchbar) = &mut touchbar {
+        touchbar.close();
+    }
     result.and(shutdown).and(drained)
 }

@@ -7,6 +7,7 @@ pub struct PresentedFrame {
     pub display_list: touchbar_ui::DisplayList,
     pub layout: touchbar_scene::FrameLayout,
     pub pixels: Option<touchbar_gl::RenderedFrame>,
+    pub target: Option<touchbar_gl::TargetFrame>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presentation {
@@ -17,6 +18,16 @@ pub trait Surface {
     fn info(&self) -> SurfaceInfo;
     fn needs_pixels(&self) -> bool {
         false
+    }
+    fn uses_shared_target(&self) -> bool {
+        false
+    }
+    fn prepare_shared_target(&mut self) -> Result<Option<crate::touchbard::TargetSlot>, String> {
+        Ok(None)
+    }
+    fn target_imported(&mut self, _path: touchbar_gl::TargetPath) {}
+    fn frame_unchanged(&mut self) -> Result<(), String> {
+        Ok(())
     }
     fn present(&mut self, frame: Arc<PresentedFrame>) -> Result<Presentation, String>;
     fn send_key(&mut self, _key: SystemKey, _phase: KeyPhase) -> Result<(), String> {
@@ -38,6 +49,8 @@ pub enum SurfaceEvent {
         generation: Generation,
     },
     Closed(SurfaceId),
+    /// Retry the retained frame after swapchain/backpressure becomes ready.
+    RetryPresent(SurfaceId),
 }
 #[derive(Default, Debug)]
 pub struct FramePacer {

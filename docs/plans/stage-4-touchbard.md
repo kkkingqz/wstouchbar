@@ -34,7 +34,7 @@
    - logind ждёт блокировки до запуска `systemd-suspend.service` и других юнитов сна, то есть раньше всех хуков system-sleep. Сами хуки запускаются параллельно (`man systemd-sleep`, systemd 259), поэтому хук `touchbar` не упорядочить с хуком, который снимает t2bce перед гибернацией (`60-ws-t2-hibernate` на машине разработчика). Та же страница советует приложениям вместо хуков блокировки logind. Suspend-then-hibernate обходится одной парой сигналов.
    - Не нужны: `/usr/lib/systemd/system-sleep/touchbar`, `touchbarctl sleep pre|post`, запросы `SleepPre` и `SleepPost`.
 2. **Сообщение `FramePresented{index, frame, commit_us}`.** `touchbard` отправляет его после завершения commit кадра. `value` — индекс буфера, `payload` — номер кадра, `x` — длительность commit в микросекундах: от передачи commit драйверу до события завершения, без очереди и IPC.
-   - Сессия передаёт ядру `FrameDone` по нему, а `BufferReleased` только освобождает буфер.
+   - Для отправленного кадра сессия передаёт ядру `FrameDone` по нему, а `BufferReleased` только освобождает буфер. Неизменённый кадр завершается локально (D128).
    - Сейчас `BufferReleased` приходит только за предыдущий буфер. Первый кадр после `Swapchain` подтвердить нечем.
 3. **Неблокирующий commit.**
    - Commit идёт с `DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT`. До FramePresented допускается только один неподтверждённый кадр; показанный буфер занят до BufferReleased и учитывается отдельно (D125).
@@ -480,7 +480,7 @@ docs/hardware-checklist.md
 - **Кадры:**
   - цель H13 и выбор свободного буфера (`BufferReleased` или ещё не отправленный);
   - `FrameDamage` ×≤8, затем `FrameReady`;
-  - `FrameDone` ядру — по `FramePresented` (предложение 2);
+  - `FrameDone` ядру для отправленного кадра — по `FramePresented` (предложение 2); неизменённый кадр завершается локально без передачи и аренды буфера (D128);
   - в `native` кадры не рисуются, первый кадр после возврата — полный.
 - **Протокольный клиент отделён от рисования** (предложение 15): в обычных тестах кадры передаются списками примитивов, без GL.
 - **`status`:** состояние подключения, режим и причина, путь буферов. Две разные метрики, p50 и p99: длительность commit — `commit_us` из `FramePresented`; задержка подтверждения — от отправки `FrameReady` до получения `FramePresented`, она включает очередь `touchbard` и IPC.
@@ -496,7 +496,7 @@ docs/hardware-checklist.md
 | `native_stops_frames_and_cancels` | `ModeChanged{native}`: кадров нет, `pressed` не отправляются, возврат — полный кадр |
 | `revoked_removes_surface` | `Revoked` удаляет поверхность и её экземпляры, переподключение создаёт новые |
 | `flow_control_respected` | не больше одного неподтверждённого кадра до FramePresented; показанный буфер занят до BufferReleased; рисование только в свободный буфер |
-| `frame_done_after_presented` | ядро получает `FrameDone` только после `FramePresented` |
+| `frame_done_after_presented` | отправленный кадр получает `FrameDone` только после `FramePresented`; неизменённый — локально без отправки (D128) |
 | `stale_buffer_fully_updated` | `FakeTouchbard` возвращает буферы не по порядку; каждый отправленный буфер целиком совпадает с текущим кадром |
 | `watch_keys_follow_bindings` | `WatchKey` совпадает с клавишами привязок поверхности |
 

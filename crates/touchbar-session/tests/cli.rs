@@ -52,3 +52,15 @@ fn locale_precedence_and_monotonic_manual_time() {
     assert_eq!(clock.now(), Timestamp(17));
     assert!(clock.set(Timestamp(16)).is_err());
 }
+#[test]
+fn touchbard_socket_override_is_absolute_and_explicit() {
+    assert_eq!(
+        parse(&["--touchbard-socket=/tmp/touchbar-test.sock"])
+            .unwrap()
+            .touchbard_socket
+            .unwrap(),
+        std::path::Path::new("/tmp/touchbar-test.sock")
+    );
+    assert!(parse(&["--touchbard-socket=relative.sock"]).is_err());
+    assert!(parse(&["--touchbard-socket"]).is_err());
+}
