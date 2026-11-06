@@ -7,8 +7,13 @@ pub struct Measurement<'a> {
     pub width_mm100: u32,
     pub height_mm100: u32,
 }
-/// Populate only from the stand's ruler/connector comparison; guesses are never measurements.
-pub const MEASURED_MODELS: &[Measurement<'static>] = &[];
+/// Active lit area, not the surrounding glass. User measurement (2026-11-06)
+/// agrees with the DRM connector's 233 x 6 mm on the MacBookPro16,1 stand.
+pub const MEASURED_MODELS: &[Measurement<'static>] = &[Measurement {
+    model: "MacBookPro16,1",
+    width_mm100: 23300,
+    height_mm100: 600,
+}];
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SizeSource {
