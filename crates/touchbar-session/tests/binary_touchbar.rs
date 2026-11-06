@@ -89,7 +89,13 @@ impl Binary {
         .unwrap();
         fake.set_mode(Mode::Display, ModeReason::Owner).unwrap();
         let log = fs::File::create(dir.path().join("session.log")).unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_touchbar-session"))
+        // Acceptance can exercise the exact staged artifact, independently of
+        // another checkout replacing the shared target's unversioned binary.
+        let binary = std::env::var_os("TOUCHBAR_TEST_SESSION_BIN")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_touchbar-session")));
+        assert!(binary.is_absolute(), "test binary path must be absolute");
+        let child = Command::new(binary)
             .args(["--desktop=fake", "--effects=fake", "--plugins"])
             .arg(dir.path().join("plugins"))
             .arg("--touchbard-socket")

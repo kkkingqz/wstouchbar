@@ -170,6 +170,22 @@ native/display, Revoked и SIGTERM с удерживаемой F5. Обычны�
 реальные таймеры grace 2 с и recovery Fn 8 с. Root и физический Touch Bar для
 этих сценариев не нужны.
 
+Для проверки именно подготовленного к установке бинарника можно задать
+`TOUCHBAR_TEST_SESSION_BIN` — абсолютный путь к `touchbar-session` в staging-дереве:
+
+```sh
+LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless \
+TOUCHBAR_TEST_SESSION_BIN=/absolute/stage/usr/lib/touchbar/touchbar-session \
+cargo test -p touchbar-session --test binary_touchbar --locked -- --ignored
+```
+
+Это исключает подмену проверяемого файла безымянным по ревизии
+`target/debug/touchbar-session` при сборках разных клонов с общим CARGO_TARGET_DIR.
+Не использовать такой общий каталог как доказательство происхождения CLI:
+`xtask` содержит путь к исходникам, с которыми был собран. Перед staging нужно
+проверить его происхождение и пересобрать исполняемые файлы нужного дерева;
+проверять следует зафиксированный staging-артефакт.
+
 ## Этап 3: сессия и окружения
 
 ```sh
