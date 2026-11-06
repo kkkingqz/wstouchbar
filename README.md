@@ -10,9 +10,12 @@ A rewrite of [kkkingqz/touchbar](https://github.com/kkkingqz/touchbar)
 The rewrite follows [docs/architecture](docs/architecture/README.md) (in Russian).
 The pure engine, WebAssembly runtime and user session are implemented. The session
 loads plugins, renders declarative controls, executes effects and can open Wayland
-simulator windows. The hardware daemon and GNOME integration are planned for the
-next stages. See [testing](docs/testing.md), [stage 3 acceptance](docs/validation/stage-3.md)
-and [architecture](docs/architecture/README.md).
+simulator windows. The hardware daemon is implemented and has passed short physical Touch Bar tests;
+full stage 4 hardware acceptance is still in progress. GNOME integration and
+application-specific media/browser sets are planned for stage 5. See the
+[implementation status](docs/implementation-status-2026-11-06.md) (in Russian),
+[stage 4 acceptance](docs/validation/stage-4.md), [testing](docs/testing.md) and
+[architecture](docs/architecture/README.md).
 
 ## Development
 
