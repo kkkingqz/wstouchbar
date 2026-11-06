@@ -9,7 +9,7 @@ fn run() -> Result<(), String> {
         .is_some_and(|s| s == "--help" || s == "-h")
     {
         println!(
-            "touchbarctl [--simulator] status [--json] | dump [-o FILE] | reload | sim fact NAME=VALUE | sim fact --unset NAME | sim theme light|dark\ntouchbarctl render PLUGIN/SET [--state FILE] [--surface WxH@Nppmm] [--theme dark|light] [--plugins DIR] -o FILE"
+            "touchbarctl [--simulator] status [--json] | dump [-o FILE] | reload\ntouchbarctl [--daemon-socket PATH] status [--json] | native | display | reload --daemon\ntouchbarctl sim fact NAME=VALUE | sim fact --unset NAME | sim theme light|dark\ntouchbarctl render PLUGIN/SET [--state FILE] [--surface WxH@Nppmm] [--theme dark|light] [--plugins DIR] -o FILE"
         );
         Ok(())
     } else {

@@ -2951,6 +2951,7 @@ dependencies = [
 name = "touchbarctl"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "async-io",
  "cosmic-text",
  "futures-lite",
@@ -2962,12 +2963,17 @@ dependencies = [
  "thiserror 2.0.21",
  "touchbar-control",
  "touchbar-core",
+ "touchbar-desktop",
+ "touchbar-effects",
  "touchbar-gl",
  "touchbar-loader",
  "touchbar-logic-runtime",
  "touchbar-model",
+ "touchbar-protocol",
  "touchbar-scene",
+ "touchbar-session",
  "touchbar-ui",
+ "touchbard",
 ]
 
 [[package]]

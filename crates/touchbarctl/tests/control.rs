@@ -1,5 +1,5 @@
 use touchbar_control::{Command, Theme};
-use touchbarctl::ControlOptions;
+use touchbarctl::{ControlCommand, ControlOptions};
 fn parse(args: &[&str]) -> Result<ControlOptions, String> {
     ControlOptions::parse(args.iter().map(|s| (*s).to_owned()))
 }
@@ -15,33 +15,33 @@ fn control_arguments_select_simulator_explicitly_or_for_sim_commands() {
     assert!(options.simulator);
     assert_eq!(
         options.command,
-        Command::SimTheme {
+        ControlCommand::Session(Command::SimTheme {
             theme: Theme::Light
-        }
+        })
     );
     let options = parse(&["sim", "fact", "display.brightness=0.4"]).unwrap();
     assert_eq!(
         options.command,
-        Command::SimFact {
+        ControlCommand::Session(Command::SimFact {
             name: "display.brightness".into(),
             value: Some(touchbar_model::FactValue::Number(0.4))
-        }
+        })
     );
     assert_eq!(
         parse(&["sim", "fact", "--unset", "app.id"])
             .unwrap()
             .command,
-        Command::SimFact {
+        ControlCommand::Session(Command::SimFact {
             name: "app.id".into(),
             value: None
-        }
+        })
     );
     assert_eq!(
         parse(&["sim", "fact", "app.id=org.test"]).unwrap().command,
-        Command::SimFact {
+        ControlCommand::Session(Command::SimFact {
             name: "app.id".into(),
             value: Some(touchbar_model::FactValue::Text("org.test".into()))
-        }
+        })
     );
     for args in [
         &["status", "--json", "--json"][..],
@@ -50,6 +50,21 @@ fn control_arguments_select_simulator_explicitly_or_for_sim_commands() {
         &["dump", "-o"],
         &["sim", "fact", "foo"],
         &["--simulator", "--simulator", "status"],
+        &["--simulator", "native"],
+        &["reload", "--daemon", "--simulator"],
+        &["status", "--daemon"],
+        &["status", "--daemon-socket", "relative.sock"],
+        &["status", "--daemon-socket", "/"],
+        &["status", "--daemon-socket"],
+        &[
+            "status",
+            "--daemon-socket",
+            "/tmp/a",
+            "--daemon-socket",
+            "/tmp/b",
+        ],
+        &["--simulator", "status", "--daemon-socket", "/tmp/a"],
+        &["dump", "--daemon-socket", "/tmp/a"],
     ] {
         assert!(parse(args).is_err(), "{args:?}");
     }

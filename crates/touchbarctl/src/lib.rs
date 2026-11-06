@@ -160,4 +160,5 @@ pub fn render_png(options: &RenderOptions) -> Result<(), String> {
 }
 
 mod control;
+mod status;
 pub use control::*;

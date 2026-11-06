@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+touchbar-protocol.workspace = true
+async-io.workspace = true
 futures-lite.workspace = true
 touchbar-control.workspace = true
 touchbar-model.workspace = true
@@ -26,6 +28,10 @@ thiserror.workspace = true
 workspace = true
 
 [dev-dependencies]
+touchbard = { path = "../touchbard" }
+touchbar-session = { path = "../touchbar-session" }
+touchbar-desktop.workspace = true
+touchbar-effects.workspace = true
+async-channel.workspace = true
 png.workspace = true
 tempfile = "3"
-async-io.workspace = true

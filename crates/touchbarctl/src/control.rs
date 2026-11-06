@@ -7,29 +7,53 @@ use std::{
 };
 use touchbar_control::{Command, Reply, Theme};
 use touchbar_model::{FactValue, Scalar};
+use touchbar_protocol::{Mode, control as daemon};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ControlCommand {
+    Status,
+    Session(Command),
+    Daemon(daemon::Command),
+}
 #[derive(Debug)]
 pub struct ControlOptions {
     pub simulator: bool,
     pub json: bool,
     pub output: Option<PathBuf>,
-    pub command: Command,
+    pub command: ControlCommand,
+    pub daemon_socket: Option<PathBuf>,
 }
 impl ControlOptions {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut simulator = false;
+        let mut daemon_socket = None;
         let mut rest = Vec::new();
-        for arg in args {
-            if arg == "--simulator" {
-                if simulator {
-                    return Err("duplicate --simulator".into());
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--simulator" => {
+                    if simulator {
+                        return Err("duplicate --simulator".into());
+                    }
+                    simulator = true;
                 }
-                simulator = true;
-            } else {
-                rest.push(arg);
+                "--daemon-socket" => {
+                    if daemon_socket.is_some() {
+                        return Err("duplicate --daemon-socket".into());
+                    }
+                    let path = PathBuf::from(args.next().ok_or("--daemon-socket requires PATH")?);
+                    if !path.is_absolute() || path.file_name().is_none() {
+                        return Err("daemon socket must be an absolute file path".into());
+                    }
+                    daemon_socket = Some(path);
+                }
+                _ => rest.push(arg),
             }
         }
         let mut args = rest.into_iter();
-        let command = args.next().ok_or("expected status, dump, reload or sim")?;
+        let command = args
+            .next()
+            .ok_or("expected status, dump, reload, native, display or sim")?;
         let mut json = false;
         let mut output = None;
         let command = match command.as_str() {
@@ -48,15 +72,29 @@ impl ControlOptions {
                     }
                 }
                 if command == "status" {
-                    Command::Status
+                    ControlCommand::Status
                 } else {
-                    Command::Dump
+                    ControlCommand::Session(Command::Dump)
                 }
             }
-            "reload" => Command::Reload,
+            "reload" => {
+                if args.as_slice().first().map(String::as_str) == Some("--daemon") {
+                    args.next();
+                    ControlCommand::Daemon(daemon::Command::Reload)
+                } else {
+                    ControlCommand::Session(Command::Reload)
+                }
+            }
+            "native" | "display" => ControlCommand::Daemon(daemon::Command::SetMode {
+                mode: if command == "native" {
+                    Mode::Native
+                } else {
+                    Mode::Display
+                },
+            }),
             "sim" => {
                 simulator = true;
-                match args.next().as_deref() {
+                ControlCommand::Session(match args.next().as_deref() {
                     Some("theme") => Command::SimTheme {
                         theme: match args.next().as_deref() {
                             Some("light") => Theme::Light,
@@ -83,14 +121,21 @@ impl ControlOptions {
                         }
                     }
                     _ => return Err("sim requires fact or theme".into()),
-                }
+                })
             }
             _ => return Err(format!("unknown command {command}")),
         };
         if args.next().is_some() {
             return Err("unexpected trailing argument".into());
         }
+        if simulator && (daemon_socket.is_some() || matches!(command, ControlCommand::Daemon(_))) {
+            return Err("simulator commands cannot target touchbard".into());
+        }
+        if daemon_socket.is_some() && matches!(command, ControlCommand::Session(_)) {
+            return Err("--daemon-socket requires status or a daemon command".into());
+        }
         Ok(Self {
+            daemon_socket,
             simulator,
             json,
             output,
@@ -144,6 +189,12 @@ fn fact_value(text: &str) -> Result<FactValue, String> {
     })
 }
 pub fn format_status(status: &serde_json::Value) -> Result<String, String> {
+    format_status_with_daemon(status, None)
+}
+pub(crate) fn format_status_with_daemon(
+    status: &serde_json::Value,
+    daemon: Option<&serde_json::Value>,
+) -> Result<String, String> {
     let core: touchbar_core::CoreSnapshot =
         serde_json::from_value(status["core"].clone()).map_err(|e| e.to_string())?;
     let last_calls: Vec<(touchbar_model::InstanceId, touchbar_model::Timestamp)> =
@@ -172,6 +223,14 @@ pub fn format_status(status: &serde_json::Value) -> Result<String, String> {
             surface.scene.profile, surface.resolution, surface.layers, surface.presentation
         )
         .unwrap();
+        if surface.info.kind == touchbar_model::SurfaceKind::Touchbar {
+            if let Some(daemon) = daemon {
+                crate::status::format_daemon(&mut text, daemon);
+            }
+            if let Some(transport) = status.get("touchbar").filter(|v| !v.is_null()) {
+                crate::status::format_transport(&mut text, transport);
+            }
+        }
         for instance in core
             .instances
             .iter()
@@ -221,13 +280,33 @@ pub fn format_status(status: &serde_json::Value) -> Result<String, String> {
     Ok(text)
 }
 pub fn run_control(options: ControlOptions) -> Result<String, String> {
+    match &options.command {
+        ControlCommand::Status if !options.simulator => return crate::status::run_status(&options),
+        ControlCommand::Daemon(command) => {
+            let reply = futures_lite::future::block_on(crate::status::daemon_call(
+                options.daemon_socket.as_deref(),
+                command.clone(),
+            ))?;
+            return match reply {
+                daemon::Reply::Ack => Ok("OK\n".into()),
+                daemon::Reply::Error(e) => Err(e),
+                _ => Err("unexpected daemon control response".into()),
+            };
+        }
+        _ => {}
+    }
+    let command = match options.command {
+        ControlCommand::Status => Command::Status,
+        ControlCommand::Session(command) => command,
+        ControlCommand::Daemon(_) => unreachable!("handled above"),
+    };
     let runtime = touchbar_control::runtime_dir().map_err(|e| e.to_string())?;
     let reply = futures_lite::future::block_on(touchbar_control::call(
         &touchbar_control::socket_path(&runtime, options.simulator),
-        options.command.clone(),
+        command.clone(),
     ))
     .map_err(|e| e.to_string())?;
-    match (reply, &options.command) {
+    match (reply, &command) {
         (Reply::Error(error), _) => Err(error),
         (Reply::Ack, Command::Reload) => {
             Ok("Reload scheduled; status reports admission errors.\n".into())
