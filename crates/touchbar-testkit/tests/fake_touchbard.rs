@@ -495,3 +495,32 @@ fn pending_replacement_keeps_its_original_release_delay() {
         assert!(started.elapsed() >= Duration::from_millis(50));
     });
 }
+
+#[test]
+fn queued_key_releases_are_drained_when_an_acknowledgement_races_peer_close() {
+    futures_lite::future::block_on(async {
+        let (mut fake, fd, _buffers) = connected(false).await;
+        wire::send_session(&fd, In::FrameReady { index: 0, frame: 1 }).unwrap();
+        assert!(matches!(
+            fake.next_event().await.unwrap(),
+            Event::Received(In::FrameReady { .. })
+        ));
+        wire::send_session(
+            &fd,
+            In::Key {
+                key: SystemKey::F5,
+                phase: KeyPhase::Released,
+            },
+        )
+        .unwrap();
+        drop(fd);
+        assert!(matches!(
+            fake.next_event().await.unwrap(),
+            Event::Received(In::Key {
+                key: SystemKey::F5,
+                phase: KeyPhase::Released
+            })
+        ));
+        assert_eq!(fake.next_event().await.unwrap(), Event::Disconnected);
+    });
+}

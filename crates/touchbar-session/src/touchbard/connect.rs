@@ -264,6 +264,16 @@ impl Connector {
             self.retry = Some(clock.now());
         }
     }
+    pub async fn finish_shutdown(&mut self, timeout: std::time::Duration) -> io::Result<()> {
+        let result = if let Some(mut client) = self.client.take() {
+            client.finish_shutdown(timeout).await
+        } else {
+            Ok(())
+        };
+        self.last.connected = false;
+        self.last.path = None;
+        result
+    }
     pub fn close(&mut self) {
         if let Some(client) = self.client.take() {
             client.handle().close();

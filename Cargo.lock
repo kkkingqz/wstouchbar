@@ -2995,6 +2995,7 @@ dependencies = [
  "touchbar-model",
  "touchbar-protocol",
  "touchbar-sets",
+ "touchbar-testkit",
  "tracing",
  "tracing-journald",
  "tracing-subscriber",

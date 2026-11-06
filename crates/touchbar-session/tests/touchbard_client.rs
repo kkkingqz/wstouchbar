@@ -382,3 +382,91 @@ fn first_frame_requests_a_full_update_without_damage_messages() {
         );
     });
 }
+
+#[test]
+fn shutdown_flushes_queued_releases_after_surface_close_before_socket_eof() {
+    futures_lite::future::block_on(async {
+        let (mut fake, mut client) = connected().await;
+        drain(&mut client, 0);
+        client
+            .handle()
+            .send_key(SystemKey::F5, KeyPhase::Pressed)
+            .unwrap();
+        client.poll(Timestamp(1)).unwrap();
+        assert!(matches!(
+            fake.next_event().await.unwrap(),
+            Peer::Received(In::Key {
+                key: SystemKey::F5,
+                phase: KeyPhase::Pressed
+            })
+        ));
+        client
+            .handle()
+            .send_key(SystemKey::F5, KeyPhase::Released)
+            .unwrap();
+        client.handle().backlight(0.5).unwrap();
+        client.handle().close();
+        let peer = async {
+            assert!(matches!(
+                fake.next_event().await.unwrap(),
+                Peer::Received(In::Key {
+                    key: SystemKey::F5,
+                    phase: KeyPhase::Released
+                })
+            ));
+            assert_eq!(fake.next_event().await.unwrap(), Peer::Disconnected);
+        };
+        let peer = futures_lite::future::or(peer, async {
+            async_io::Timer::after(Duration::from_millis(200)).await;
+            panic!("shutdown did not expose EOF while client still owns its fd");
+        });
+        let (sent, ()) =
+            futures_lite::future::zip(client.finish_shutdown(Duration::from_millis(100)), peer)
+                .await;
+        sent.unwrap();
+    });
+}
+
+#[test]
+fn shutdown_bounds_a_peer_that_does_not_read_release_messages() {
+    futures_lite::future::block_on(async {
+        let (server, fd) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        rustix::net::sockopt::set_socket_send_buffer_size(&fd, 4096).unwrap();
+        let sender = rustix::io::dup(&fd).unwrap();
+        let mut client = Client::from_fd(fd, SurfaceId(21)).unwrap();
+        loop {
+            match wire::send_session(&sender, In::Hello { version: 2 }) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => panic!("{e}"),
+            }
+        }
+        client
+            .handle()
+            .send_key(SystemKey::F5, KeyPhase::Released)
+            .unwrap();
+        let at = std::time::Instant::now();
+        assert_eq!(
+            client
+                .finish_shutdown(Duration::from_millis(20))
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        assert!(at.elapsed() < Duration::from_secs(1));
+        assert!(
+            client
+                .handle()
+                .send_key(SystemKey::F5, KeyPhase::Released)
+                .is_err()
+        );
+        drop(server);
+    });
+}

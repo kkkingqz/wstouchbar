@@ -509,6 +509,59 @@ impl Client {
         s.status.error = Some(error.to_string());
         let _ = rustix::net::shutdown(self.fd.get_ref(), rustix::net::Shutdown::Both);
     }
+    /// Surface removal closes the handle before the driver can poll it again.
+    /// Flush only queued releases, even on that closed handle, under one deadline.
+    pub async fn finish_shutdown(&mut self, timeout: std::time::Duration) -> io::Result<()> {
+        self.handle.close();
+        self.handle.0.borrow_mut().outgoing.retain(|m| {
+            matches!(
+                m,
+                In::Key {
+                    phase: KeyPhase::Released,
+                    ..
+                }
+            )
+        });
+        let result = futures_lite::future::or(
+            async {
+                loop {
+                    let message = self.handle.0.borrow().outgoing.front().copied();
+                    let Some(message) = message else {
+                        break;
+                    };
+                    self.fd
+                        .write_with(|fd| wire::send_session(fd, message))
+                        .await?;
+                    self.handle.0.borrow_mut().outgoing.pop_front();
+                }
+                // Half-close write first: closing with unread acknowledgements
+                // can reset a seqpacket connection and lose the final releases.
+                rustix::net::shutdown(self.fd.get_ref(), rustix::net::Shutdown::Write)?;
+                loop {
+                    match self.fd.read_with(|fd| wire::recv_daemon(fd)).await {
+                        Ok(_) => {}
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset
+                            ) =>
+                        {
+                            return Ok(());
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            },
+            async {
+                async_io::Timer::after(timeout).await;
+                Err(io::ErrorKind::TimedOut.into())
+            },
+        )
+        .await;
+        self.handle.0.borrow_mut().outgoing.clear();
+        self.handle.0.borrow_mut().status.connected = false;
+        result
+    }
     pub fn poll(&mut self, now: Timestamp) -> io::Result<Option<ClientEvent>> {
         let result = self.poll_inner(now);
         if let Err(error) = &result {

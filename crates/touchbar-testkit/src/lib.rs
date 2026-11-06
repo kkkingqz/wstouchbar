@@ -30,3 +30,6 @@ pub use plugin::*;
 
 mod touchbard;
 pub use touchbard::*;
+
+mod session_peer;
+pub use session_peer::TestSessionPeer;

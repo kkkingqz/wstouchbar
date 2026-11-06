@@ -38,3 +38,4 @@ tracing-subscriber.workspace = true
 rustix = { workspace = true, features = ["pipe"] }
 proptest.workspace = true
 tempfile = "3"
+touchbar-testkit = { path = "../touchbar-testkit" }

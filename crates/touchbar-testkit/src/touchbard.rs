@@ -469,8 +469,22 @@ impl FakeTouchbard {
             return Ok(FakeTouchbardEvent::Connected);
         }
         loop {
-            if let Some(event) = self.due()? {
-                return Ok(event);
+            match self.due() {
+                Ok(Some(event)) => return Ok(event),
+                Ok(None) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+                    ) =>
+                {
+                    // The peer may close with final key releases still in our
+                    // receive queue. Stop sending acks, then drain those records
+                    // before reporting Disconnected from recv's EOF.
+                    self.pending = None;
+                    self.releases.clear();
+                }
+                Err(e) => return Err(e),
             }
             enum Ready {
                 Message(io::Result<In>),

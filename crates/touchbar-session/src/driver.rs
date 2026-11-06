@@ -435,9 +435,16 @@ async fn run_async(cli: Cli) -> Result<()> {
     }
     .await;
     let shutdown = session.shutdown();
-    let drained = session.finish_shutdown().await;
-    if let Some(touchbar) = &mut touchbar {
-        touchbar.close();
-    }
-    result.and(shutdown).and(drained)
+    let (drained, transport) = futures_lite::future::zip(session.finish_shutdown(), async {
+        if let Some(touchbar) = &mut touchbar {
+            touchbar
+                .finish_shutdown(Duration::from_secs(2))
+                .await
+                .map_err(anyhow::Error::from)
+        } else {
+            Ok(())
+        }
+    })
+    .await;
+    result.and(shutdown).and(drained).and(transport)
 }
