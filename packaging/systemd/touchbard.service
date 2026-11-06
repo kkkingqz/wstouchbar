@@ -42,6 +42,6 @@ DeviceAllow=char-drm rw
 DeviceAllow=char-input r
 DeviceAllow=/dev/uinput rw
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
-# Provisional minimum; validated on the bounded hardware stand before H16 closes.
+# H16 hardware stand (2026-11-06): DRM, uinput and hand-back need no extra caps.
 CapabilityBoundingSet=CAP_SYS_MODULE
 SystemCallFilter=~@mount
