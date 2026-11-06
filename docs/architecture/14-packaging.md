@@ -14,12 +14,12 @@ cargo xtask install --prefix=/usr --destdir=target/stage
 |---|---|
 | `/usr/lib/touchbar/touchbard` | root-демон |
 | `/usr/lib/touchbar/touchbar-session` | сессия |
+| `/usr/lib/touchbar/touchbar-spawn-helper` | изоляция групп процессов spawn |
 | `/usr/bin/touchbarctl` | CLI |
 | `/usr/lib/systemd/system/touchbard.service` | системный юнит (запускается udev) |
 | `/usr/lib/systemd/user/touchbar-session.service` | пользовательский юнит (`graphical-session.target`) |
-| `/usr/lib/systemd/system-sleep/touchbar` | `touchbarctl sleep pre\|post` |
-| `/usr/lib/udev/rules.d/90-touchbar.rules` | запуск `touchbard`, права устройств |
-| `/usr/lib/sysusers.d/touchbar.conf` | группа `touchbar` |
+| `/usr/lib/udev/rules.d/90-touchbar.rules` | начальная конфигурация 1 и запуск `touchbard` |
+| `/usr/lib/udev/rules.d/99-wstouchbar-isolation.rules` | обязательная изоляция DRM и дигитайзера от композитора |
 | `/usr/lib/tmpfiles.d/touchbar.conf` | `/run/touchbar` |
 | `/usr/share/touchbar/touchbard.toml` | значения по умолчанию `touchbard` |
 | `/usr/share/touchbar/plugins/*` | плагины первой версии (wasm собран при сборке пакета) |
@@ -28,7 +28,55 @@ cargo xtask install --prefix=/usr --destdir=target/stage
 
 `/etc/touchbar/touchbard.toml` пакет не создаёт: это файл администратора.
 
-## Поведение установки
+## Дерево этапа 4
+
+`xtask install` создаёт отдельное staging-дерево: `--destdir` обязателен,
+`--prefix` по умолчанию `/usr`. Команда собирает четыре бинарника и плагины,
+учитывая Cargo target directory из окружения. По умолчанию используется
+`--profile release`; для локальной проверки можно выбрать `--profile dev`
+и использовать существующий кеш сборки. Службы и правила не активируются.
+Расширение GNOME в дерево этапа 4 не входит.
+
+В корне дерева записывается `.touchbar-install-manifest.json` версии 1:
+логический prefix, относительные пути, SHA-256 и права файлов. Абсолютных
+путей к каталогу сборщика в манифесте нет. Этот служебный файл не включается
+в payload будущего пакета. Бинарники получают 0755, данные — 0644, каталоги —
+0755. Предварительная сборка публикуется целиком; непустое чужое дерево,
+изменённые установленные файлы и дополнительные файлы не заменяются.
+
+```sh
+cargo xtask install --profile dev --prefix=/usr --destdir=target/stage
+cargo xtask uninstall --manifest target/stage/.touchbar-install-manifest.json
+```
+
+`uninstall` работает с этим staging-деревом. Перед любым удалением проверяются
+весь манифест, пути, хеши и права. Изменённый файл приводит к отказу; посторонние
+файлы сохраняются. Пути разрешаются относительно открытого корня с запретом
+символьных ссылок и выхода за его пределы. Prefix может задавать другую
+раскладку сборочного дерева; для штатной установки и поиска ресурсов используется
+`/usr`. Ни install, ни uninstall не вызывают systemctl или udevadm.
+
+Системный юнит сохраняет `/run/touchbar` после остановки, включая recovery и
+маркер autodim. Перед запуском загружается `hid_appletb_kbd`; новая файловая
+namespace разрешает запись в `/sys/devices` и параметры только этого модуля
+(D129). USB/HID/подсветка при повторном появлении могут получить другие пути,
+поэтому исключение на одну старую директорию устройства недостаточно.
+`appletbdrm` по-прежнему загружает демон после проверки правила изоляции.
+Доступ к символьным устройствам отдельно ограничен DevicePolicy/DeviceAllow.
+Минимальный CapabilityBoundingSet проверяется аппаратным стендом до закрытия H16.
+
+Офлайн-проверка файлов (без запуска служб):
+
+```sh
+cargo xtask test-env packaging
+```
+
+Требуются systemd-analyze, modprobe и udevadm. При проверке пути исполняемых
+файлов в юнитах перемещаются на временные исполняемые заглушки; настройки
+изоляции и правила udev не меняются. Аппаратную работоспособность такая проверка
+не подтверждает.
+
+## Поведение установки пакета (следующий этап упаковки)
 
 - **Сразу после установки ничего не меняется.** Touch Bar остаётся в нативном режиме, пока пользователь не войдёт и сессия не подключится.
 - **Пакет включает** `touchbar-session.service` глобально (`systemctl --global enable`) и перечитывает правила udev. Расширение GNOME каждый пользователь включает сам через `touchbarctl setup`. Без расширения сессия работает с бэкендом `null` и подсказывает в журнале и `status` запустить `setup`.
@@ -52,7 +100,7 @@ RPM (Fedora через COPR) — позже, если появится спро�
 ## Сборка
 
 - **Rust:** stable, MSRV фиксируется в `rust-toolchain.toml`. Цели: `x86_64-unknown-linux-gnu`, а для плагинов `wasm32-unknown-unknown` (тоже в `rust-toolchain.toml`) с превращением в компонент библиотекой `wit-component` внутри `xtask` и `touchbar-wasm-fixtures`.
-- **Системные зависимости сборки:** `libpipewire-0.3-dev`, `libdrm-dev`, `libgbm-dev`, `libegl-dev`, `libudev-dev`, `libfontconfig-dev`.
+- **Системные зависимости сборки:** `libpipewire-0.3-dev`, `libegl-dev`, `libfontconfig-dev`; нужны pkg-config и clang/libclang для привязок PipeWire. DRM/udev не требуют соответствующих dev-пакетов (D111); EGL/GLES и необязательный libgbm используются во время GPU-проверок.
 - **Локальная сборка на машине пользователя** — в distrobox `touchbar-build` (на хосте нет компилятора).
 
 ## wsconfig

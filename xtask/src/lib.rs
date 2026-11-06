@@ -146,3 +146,5 @@ pub fn check_hardware(usb_devices: &Path, effective_uid: u32) -> Result<(), Stri
     }
     Err("hardware environment requires Touch Bar USB 05ac:8302".into())
 }
+
+pub mod install;

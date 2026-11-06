@@ -10,11 +10,16 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 rustix.workspace = true
 wit-component.workspace = true
 tempfile = "3"
 
 [dev-dependencies]
+touchbar-protocol.workspace = true
+touchbard = { path = "../crates/touchbard" }
 touchbar-wasm-fixtures.workspace = true
 touchbar-loader.workspace = true
 touchbar-logic-runtime.workspace = true

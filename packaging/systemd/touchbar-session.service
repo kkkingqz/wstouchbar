@@ -1,0 +1,20 @@
+[Unit]
+Description=Touch Bar session
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=exec
+ExecStart=@SESSION@
+Restart=on-failure
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=30s
+# Includes descendants that call setsid; drain the complete group on any death.
+KillMode=control-group
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=graphical-session.target

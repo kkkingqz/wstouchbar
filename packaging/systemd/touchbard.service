@@ -1,0 +1,44 @@
+[Unit]
+Description=Touch Bar hardware daemon
+After=systemd-udevd.service dbus.service systemd-logind.service
+Wants=systemd-logind.service
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=exec
+# Only the native driver is preloaded. Its parameter directory must exist when
+# ExecStart gets its own mount namespace. appletbdrm is loaded by the daemon
+# after it verifies compositor isolation, never by this preparation step.
+ExecStartPre=modprobe hid_appletb_kbd
+ExecStart=@TOUCHBARD@
+ExecStopPost=@TOUCHBARD@ --hand-back
+Restart=on-failure
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=30s
+TimeoutStopSec=10s
+KillMode=control-group
+RuntimeDirectory=touchbar
+RuntimeDirectoryMode=0755
+# recovery and autodim must survive both restarts and explicit stop/start.
+RuntimeDirectoryPreserve=yes
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=false
+ProtectControlGroups=true
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+# USB/HID/backlight nodes reappear at different canonical locations. A mount
+# of one old node would pin it and hide the replacement; keep their devices
+# ancestor writable. The driver validates the selected device and attributes.
+ReadWritePaths=/run/touchbar /sys/devices -/sys/module/hid_appletb_kbd/parameters
+DevicePolicy=closed
+DeviceAllow=char-drm rw
+DeviceAllow=char-input r
+DeviceAllow=/dev/uinput rw
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# Provisional minimum; validated on the bounded hardware stand before H16 closes.
+CapabilityBoundingSet=CAP_SYS_MODULE
+SystemCallFilter=~@mount

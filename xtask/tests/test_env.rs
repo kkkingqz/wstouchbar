@@ -76,6 +76,11 @@ fn service_test_suites_use_private_environment_tools_and_distinct_filters() {
             "test\n--workspace\n--locked\nenv_dbus_\n--\n--ignored\n--nocapture\n",
         ),
         (
+            "packaging",
+            vec!["systemd-analyze", "udevadm"],
+            "test\n--workspace\n--locked\nenv_packaging_\n--\n--ignored\n--nocapture\n",
+        ),
+        (
             "pipewire",
             vec!["pipewire", "wireplumber"],
             "test\n--workspace\n--locked\nenv_pipewire_\n--\n--ignored\n--nocapture\n",

@@ -6,6 +6,7 @@ enum Environment {
     Dbus,
     Pipewire,
     Hardware,
+    Packaging,
 }
 impl Environment {
     fn parse(value: &str) -> Option<Self> {
@@ -14,6 +15,7 @@ impl Environment {
             "dbus" => Some(Self::Dbus),
             "pipewire" => Some(Self::Pipewire),
             "hardware" => Some(Self::Hardware),
+            "packaging" => Some(Self::Packaging),
             _ => None,
         }
     }
@@ -23,6 +25,7 @@ impl Environment {
             Self::Dbus => "env_dbus_",
             Self::Pipewire => "env_pipewire_",
             Self::Hardware => "env_hardware_",
+            Self::Packaging => "env_packaging_",
         }
     }
     fn check(self) -> Result<(), String> {
@@ -52,6 +55,10 @@ impl Environment {
                 std::path::Path::new("/sys/bus/usb/devices"),
                 rustix::process::geteuid().as_raw(),
             ),
+            Self::Packaging => {
+                check_program("systemd-analyze")?;
+                check_program("udevadm")
+            }
             Self::Dbus => check_program("dbus-daemon"),
             Self::Pipewire => {
                 check_program("pipewire")?;
@@ -103,6 +110,21 @@ fn run(environment: Environment) -> Result<u8, String> {
 }
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if matches!(
+        args.first().map(String::as_str),
+        Some("install" | "uninstall")
+    ) {
+        return match install_command(&args) {
+            Ok(message) => {
+                println!("{message}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("xtask: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args.first().map(String::as_str) == Some("build-plugins") {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -111,7 +133,9 @@ fn main() -> ExitCode {
             [] => root.join("target/plugins"),
             [flag, path] if flag == "--out" => path.into(),
             _ => {
-                eprintln!("Usage: cargo xtask build-plugins [--out DIR]");
+                eprintln!(
+                    "Usage: cargo xtask build-plugins [--out DIR]; cargo xtask install --destdir DIR [--prefix /usr] [--profile release|dev]; cargo xtask uninstall --manifest FILE"
+                );
                 return ExitCode::from(2);
             }
         };
@@ -128,19 +152,19 @@ fn main() -> ExitCode {
     }
     if args.as_slice() == ["--help"] || args.as_slice() == ["-h"] {
         println!(
-            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware; cargo xtask build-plugins [--out DIR]"
+            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware|packaging; cargo xtask build-plugins [--out DIR]; cargo xtask install --destdir DIR [--prefix /usr] [--profile release|dev]; cargo xtask uninstall --manifest FILE"
         );
         return ExitCode::SUCCESS;
     }
     let [command, name] = args.as_slice() else {
         eprintln!(
-            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware; cargo xtask build-plugins [--out DIR]"
+            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware|packaging; cargo xtask build-plugins [--out DIR]; cargo xtask install --destdir DIR [--prefix /usr] [--profile release|dev]; cargo xtask uninstall --manifest FILE"
         );
         return ExitCode::from(2);
     };
     let Some(environment) = Environment::parse(name).filter(|_| command == "test-env") else {
         eprintln!(
-            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware; cargo xtask build-plugins [--out DIR]"
+            "Usage: cargo xtask test-env gpu|dbus|pipewire|hardware|packaging; cargo xtask build-plugins [--out DIR]; cargo xtask install --destdir DIR [--prefix /usr] [--profile release|dev]; cargo xtask uninstall --manifest FILE"
         );
         return ExitCode::from(2);
     };
@@ -151,4 +175,53 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn install_command(args: &[String]) -> Result<String, String> {
+    use std::path::{Path, PathBuf};
+    let mut flags = std::collections::BTreeMap::new();
+    let mut rest = args[1..].iter();
+    while let Some(arg) = rest.next() {
+        let (key, value) = if let Some((k, v)) = arg.split_once('=') {
+            (k, v.to_owned())
+        } else {
+            let value = rest
+                .next()
+                .filter(|v| !v.starts_with("--"))
+                .ok_or_else(|| format!("{arg} requires a value"))?;
+            (arg.as_str(), value.clone())
+        };
+        if !matches!(key, "--prefix" | "--destdir" | "--profile" | "--manifest")
+            || flags.insert(key, value).is_some()
+        {
+            return Err(format!("unknown or duplicate argument {key}"));
+        }
+    }
+    if args[0] == "uninstall" {
+        let file = flags
+            .remove("--manifest")
+            .ok_or("uninstall requires --manifest FILE")?;
+        if !flags.is_empty() {
+            return Err("uninstall only accepts --manifest".into());
+        }
+        xtask::install::uninstall(Path::new(&file))?;
+        return Ok(format!("Uninstalled package files from {}", file));
+    }
+    let out = PathBuf::from(
+        flags
+            .remove("--destdir")
+            .ok_or("install requires --destdir DIR; it builds a staging tree only")?,
+    );
+    let prefix = PathBuf::from(flags.remove("--prefix").unwrap_or_else(|| "/usr".into()));
+    let profile = flags
+        .remove("--profile")
+        .unwrap_or_else(|| "release".into());
+    if !flags.is_empty() {
+        return Err("install does not accept --manifest".into());
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root");
+    let manifest = xtask::install::build(root, &out, &prefix, &profile)?;
+    Ok(format!("Install manifest: {}", manifest.display()))
 }

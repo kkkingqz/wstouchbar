@@ -1,0 +1,4 @@
+# Native on initial device arrival; the daemon chooses display after ownership.
+# Match only the USB device, never interface events during configuration changes.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", ATTR{idProduct}=="8302", ATTR{bConfigurationValue}="1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="touchbard.service"
+# DRM and digitizer isolation is in 99-wstouchbar-isolation.rules.

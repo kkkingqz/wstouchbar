@@ -3954,12 +3954,17 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "sha2",
  "tempfile",
  "touchbar-core",
  "touchbar-loader",
  "touchbar-logic-runtime",
  "touchbar-model",
+ "touchbar-protocol",
  "touchbar-wasm-fixtures",
+ "touchbard",
  "wit-component 0.261.0",
 ]
 

@@ -517,7 +517,7 @@ docs/hardware-checklist.md
   - `ProtectSystem=strict`, `ProtectKernelTunables=true` с явными `ReadWritePaths`;
   - `DevicePolicy=closed` с доступом к DRM, input и `/dev/uinput`;
   - `RestrictAddressFamilies=AF_UNIX AF_NETLINK`;
-  - модули грузит сам демон, поэтому `ProtectKernelModules` выключен.
+  - `ExecStartPre` загружает нативный `hid_appletb_kbd`, чтобы узкое исключение RW его параметров существовало при создании namespace `ExecStart` (D129); `appletbdrm` загружает сам демон после проверки изоляции, поэтому `ProtectKernelModules` выключен.
 
   Минимальный набор capabilities определяется и проверяется на стенде.
 - **`touchbar-session.service`** (пользовательский): `graphical-session.target`, `Restart=on-failure` с backoff, `KillMode=control-group` (предложение 11).
