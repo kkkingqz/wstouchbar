@@ -57,7 +57,9 @@ cargo xtask uninstall --manifest target/stage/.touchbar-install-manifest.json
 `/usr`. Ни install, ни uninstall не вызывают systemctl или udevadm.
 
 Системный юнит сохраняет `/run/touchbar` после остановки, включая recovery и
-маркер autodim. Перед запуском загружается `hid_appletb_kbd`; новая файловая
+маркер autodim. Явный `BindReadOnlyPaths=/sys` обеспечивает read-only sysfs:
+на проверенной systemd 259 одного ProtectKernelTunables недостаточно при
+уже смонтированном API sysfs. Перед запуском загружается `hid_appletb_kbd`; новая файловая
 namespace разрешает запись в `/sys/devices` и параметры только этого модуля
 (D129). USB/HID/подсветка при повторном появлении могут получить другие пути,
 поэтому исключение на одну старую директорию устройства недостаточно.
@@ -75,6 +77,12 @@ cargo xtask test-env packaging
 файлов в юнитах перемещаются на временные исполняемые заглушки; настройки
 изоляции и правила udev не меняются. Аппаратную работоспособность такая проверка
 не подтверждает.
+
+Отдельный ignored-тест `env_systemd_sysfs_mount_exceptions_are_effective`
+проверяет фактические флаги монтирований в пользовательском systemd-юните
+с настройками sysfs из шаблона. Ему нужны работающий user manager, user
+namespaces и Python 3. Он только читает метаданные, не открывает устройства,
+не запускает демон и не включён в офлайн-набор `test-env packaging`.
 
 ## Поведение установки пакета (следующий этап упаковки)
 

@@ -256,3 +256,64 @@ fn env_packaging_systemd_units_and_udev_rules_verify() {
         0o755
     );
 }
+
+#[test]
+#[ignore = "requires a running systemd user manager, user namespaces and python3; starts only a read-only diagnostic"]
+fn env_systemd_sysfs_mount_exceptions_are_effective() {
+    assert_ne!(
+        rustix::process::geteuid().as_raw(),
+        0,
+        "run as a normal user"
+    );
+    let mut command = std::process::Command::new("systemd-run");
+    let nonce = tempfile::tempdir().unwrap();
+    command.args(["--user", "--wait", "--pipe", "--collect"]);
+    command.arg(format!(
+        "--unit=wstouchbar-sysfs-{}-{}",
+        std::process::id(),
+        nonce
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .trim_start_matches('.')
+    ));
+    command.args([
+        "--property=PrivateUsers=yes",
+        "--property=RuntimeMaxSec=10s",
+        "--property=TimeoutStopSec=5s",
+    ]);
+    let text = unit("touchbard.service");
+    for key in [
+        "ProtectSystem",
+        "ProtectKernelTunables",
+        "ProtectKernelModules",
+        "ProtectControlGroups",
+        "BindReadOnlyPaths",
+        "ReadWritePaths",
+    ] {
+        let mut paths = values(&text, key);
+        if key == "ReadWritePaths" {
+            // This diagnostic never opens the daemon runtime or any device.
+            paths.retain(|p| p.trim_start_matches('-').starts_with("/sys/"));
+        }
+        if !paths.is_empty() {
+            command.arg(format!("--property={key}={}", paths.join(" ")));
+        }
+    }
+    let output = command
+        .args([
+            "/usr/bin/python3",
+            "-c",
+            "import os,pathlib; expected={'/sys':True,'/sys/module':True,'/sys/devices':False,'/usr':True,'/etc':True}; p='/sys/module/hid_appletb_kbd/parameters'; expected.update({p:False} if pathlib.Path(p).exists() else {}); actual={p:bool(os.statvfs(p).f_flag & os.ST_RDONLY) for p in expected}; print(actual); assert actual==expected, (actual,expected)",
+        ])
+        .output()
+        .expect("systemd-run unavailable");
+    assert!(
+        output.status.success(),
+        "sysfs mount protection differs from the unit contract:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

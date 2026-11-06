@@ -30,6 +30,9 @@ ProtectControlGroups=true
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
+# Force an explicit bind: on systemd 259 an already-mounted API sysfs can skip
+# ProtectKernelTunables' read-only remount. Preserve only the exceptions below.
+BindReadOnlyPaths=/sys
 # USB/HID/backlight nodes reappear at different canonical locations. A mount
 # of one old node would pin it and hide the replacement; keep their devices
 # ancestor writable. The driver validates the selected device and attributes.
