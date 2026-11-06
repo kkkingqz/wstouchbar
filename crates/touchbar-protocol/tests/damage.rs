@@ -14,7 +14,7 @@ fn header(rotated: bool) -> SwapchainHeader {
     }
 }
 #[test]
-fn damage_maps_both_ways_using_v1_axis_exchange() {
+fn damage_maps_both_ways_using_clockwise_rotation() {
     let logical = DamageRect {
         x: 100,
         y: 4,
@@ -29,7 +29,7 @@ fn damage_maps_both_ways_using_v1_axis_exchange() {
             physical,
             if rotated {
                 DamageRect {
-                    x: 4,
+                    x: 48,
                     y: 100,
                     width: 8,
                     height: 20,

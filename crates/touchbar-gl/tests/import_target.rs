@@ -50,7 +50,7 @@ fn buffers(h: SwapchainHeader) -> (Vec<OwnedFd>, Vec<File>) {
 fn packet(colors: [Color; 3]) -> DisplayList {
     let mut scene = Scene::new(Color::BLACK);
     for (i, c) in colors.into_iter().enumerate() {
-        scene.rounded_rect(Rect::new((i * 5) as f32, 0.0, 2.0, 4.0), 0.0, c);
+        scene.rounded_rect(Rect::new((i * 5) as f32, 0.0, 2.0, 3.0), 0.0, c);
     }
     DisplayList::from_scene(&scene, Duration::ZERO, MotionPolicy::Disabled).unwrap()
 }
@@ -62,7 +62,7 @@ fn expected(h: SwapchainHeader, rgba: &[u8]) -> Vec<u8> {
                 if (h.physical_width, h.physical_height) == (h.logical_width, h.logical_height) {
                     (x, y)
                 } else {
-                    (y, x)
+                    (h.physical_width - 1 - y, x)
                 };
             let src = usize::try_from((y * h.logical_width + x) * 4).unwrap();
             let dst = usize::try_from(py * h.pitch + px * 4).unwrap();
@@ -78,7 +78,51 @@ fn bytes(file: &File, h: SwapchainHeader) -> Vec<u8> {
 }
 #[test]
 #[ignore = "requires EGL (Mesa llvmpipe)"]
-fn env_gpu_memfd_target_matches_landscape_reference_and_transposed_protocol_coordinates() {
+fn env_gpu_portrait_target_rotates_asymmetric_corners_without_reflection() {
+    let h = header(true);
+    let (fds, files) = buffers(h);
+    let mut scene = Scene::new(Color::BLACK);
+    for (x, y, color) in [
+        (0.0, 0.0, Color::rgb(1.0, 0.0, 0.0)),
+        (0.0, 2.0, Color::rgb(0.0, 1.0, 0.0)),
+        (12.0, 0.0, Color::rgb(0.0, 0.0, 1.0)),
+        (12.0, 2.0, Color::WHITE),
+    ] {
+        scene.rounded_rect(Rect::new(x, y, 4.0, 2.0), 0.0, color);
+    }
+    let scene = DisplayList::from_scene(&scene, Duration::ZERO, MotionPolicy::Disabled).unwrap();
+    let mut renderer = Renderer::new(Backend::Surfaceless).unwrap();
+    let reference = renderer
+        .render(SurfaceId(1), (16, 4), Orientation::Landscape, &scene, true)
+        .unwrap()
+        .unwrap();
+    let mut target = renderer.import_target(fds, h).unwrap();
+    renderer
+        .render_target(SurfaceId(2), &mut target, 0, &scene, false)
+        .unwrap()
+        .unwrap();
+    let actual = bytes(&files[0], h);
+    // Hand-mapped corners of a clockwise 16x4 -> 4x16 rotation.
+    // The reference supplies rasterized colors, not the coordinate transform.
+    for ((lx, ly), (px, py)) in [
+        ((1, 0), (3, 1)),
+        ((1, 3), (0, 1)),
+        ((14, 0), (3, 14)),
+        ((14, 3), (0, 14)),
+    ] {
+        let src = (ly * 16 + lx) * 4;
+        let dst = py * usize::try_from(h.pitch).unwrap() + px * 4;
+        let rgba = &reference.pixels[src..src + 4];
+        assert_eq!(
+            &actual[dst..dst + 4],
+            &[rgba[2], rgba[1], rgba[0], 255],
+            "logical ({lx},{ly}) must be physical ({px},{py}) without reflection"
+        );
+    }
+}
+#[test]
+#[ignore = "requires EGL (Mesa llvmpipe)"]
+fn env_gpu_memfd_target_matches_landscape_reference_and_rotated_protocol_coordinates() {
     for rotated in [false, true] {
         let h = header(rotated);
         let (fds, files) = buffers(h);

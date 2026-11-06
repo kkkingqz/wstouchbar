@@ -319,7 +319,7 @@ fn golden(image: &Image) {
     for x in 0..WIDTH as usize {
         for y in 0..HEIGHT as usize {
             let src = (y * WIDTH as usize + x) * 4;
-            let dst = x * 256 + y * 4;
+            let dst = x * 256 + (HEIGHT as usize - 1 - y) * 4;
             let actual = [
                 image.pixels[dst + 2],
                 image.pixels[dst + 1],

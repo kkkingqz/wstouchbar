@@ -11,22 +11,31 @@ pub fn logical_to_physical(header: SwapchainHeader, rect: DamageRect) -> io::Res
     if !rect.fits(header.logical_width, header.logical_height) {
         return Err(invalid("logical damage outside surface"));
     }
-    map(header, rect)
+    match header.transform() {
+        Some(OutputTransform::Identity) => Ok(rect),
+        Some(OutputTransform::QuarterTurn) => Ok(DamageRect {
+            x: u16::try_from(header.logical_height).expect("validated extent fits u16")
+                - rect.y
+                - rect.height,
+            y: rect.x,
+            width: rect.height,
+            height: rect.width,
+        }),
+        None => Err(invalid("unsupported output transform")),
+    }
 }
 pub fn physical_to_logical(header: SwapchainHeader, rect: DamageRect) -> io::Result<DamageRect> {
     header.validate()?;
     if !rect.fits(header.physical_width, header.physical_height) {
         return Err(invalid("physical damage outside surface"));
     }
-    map(header, rect)
-}
-fn map(header: SwapchainHeader, rect: DamageRect) -> io::Result<DamageRect> {
-    // v1's QuarterTurn exchanges axes (physical X=logical Y, physical Y=logical X).
     match header.transform() {
         Some(OutputTransform::Identity) => Ok(rect),
         Some(OutputTransform::QuarterTurn) => Ok(DamageRect {
             x: rect.y,
-            y: rect.x,
+            y: u16::try_from(header.logical_height).expect("validated extent fits u16")
+                - rect.x
+                - rect.width,
             width: rect.height,
             height: rect.width,
         }),

@@ -20,8 +20,6 @@ pub enum Orientation {
     Landscape,
     Clockwise,
     CounterClockwise,
-    /// Exchange X/Y for the portrait v2 shared-buffer layout.
-    Transpose,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DamageRect {

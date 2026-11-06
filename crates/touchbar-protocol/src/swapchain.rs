@@ -6,6 +6,7 @@ pub const XRGB8888: u32 = 0x34325258;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputTransform {
     Identity,
+    /// Clockwise in top-down pixel coordinates: (x, y) -> (height - 1 - y, x).
     QuarterTurn,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -254,7 +254,6 @@ impl Native {
                     match surface.orientation {
                         Orientation::Clockwise => 1,
                         Orientation::CounterClockwise => 2,
-                        Orientation::Transpose => 3,
                         Orientation::Landscape => 0,
                     },
                 );
@@ -340,7 +339,7 @@ impl Native {
         let size = (target.header.logical_width, target.header.logical_height);
         let orientation = match target.header.transform() {
             Some(touchbar_protocol::OutputTransform::Identity) => Orientation::Landscape,
-            _ => Orientation::Transpose,
+            _ => Orientation::Clockwise,
         };
         let full = target.bind(id) || full;
         let mut surface = if let Some(old) = self.surfaces.remove(&id) {
@@ -953,7 +952,7 @@ fn damage(spans: &[(u32, u32)], size: (u32, u32), orientation: Orientation) -> V
                 width: end - start,
                 height: size.1,
             },
-            Orientation::Clockwise | Orientation::Transpose => DamageRect {
+            Orientation::Clockwise => DamageRect {
                 x: 0,
                 y: start,
                 width: size.1,
